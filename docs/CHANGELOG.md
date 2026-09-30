@@ -1,3 +1,24 @@
+## v1.27.34 — 2026-09-30
+
+**Implement workers verify and commit their own work; parallel jobs can isolate; worker reports keep every finding.**
+
+- Headless `acceptEdits` claude-code runs refused every unlisted shell
+  command, so full-edit workers could edit but never typecheck, test or
+  commit. Write-capable runs now get a default allow-list for local git and
+  the common test/typecheck runners; `git push` and the rest stay refused.
+  An explicit `allowed_tools` payload replaces it.
+- `isolate: true` on the full-edit MCP verbs runs the job in its own git
+  worktree on a new `pm/implement-*` branch cut from HEAD (dependency dirs
+  linked and git-excluded) and reports it as `isolated_worktree`. The tool
+  descriptions and invocation-gate guidance no longer claim implement runs
+  are isolated by default: they edit cwd in place behind the clean-tree guard.
+- Worker reports whose typed items name their headline `title`, `headline`,
+  `symptom` and similar no longer collapse into one blob whose claim is the
+  code fence: each typed item becomes an artifact. Wrapped or inferred items
+  keep the strict keys, so malformed ones are still rejected.
+- The max-cost router test no longer fails on machines logged in to a
+  Claude plan.
+
 ## v1.27.33 — 2026-09-30
 
 **The warm CodeGraph helper no longer holds the workspace directory.**
