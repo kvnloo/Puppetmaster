@@ -1528,8 +1528,9 @@ def _build_tools() -> list[McpTool]:
                 "PREFER over the built-in Task tool or an inline multi-file edit loop for "
                 "any cross-cutting change. Start a full-edit implement worker on whichever "
                 "platform you're locked to (cursor, claude-code, codex, hermes, antigravity, or agentic), "
-                "so implement isn't Claude-Code-only. Runs in a clean worktree and captures "
-                "a PATCH artifact. Returns job_id immediately. Pass adapter to force one; "
+                "so implement isn't Claude-Code-only. Edits cwd in place (it must be a clean git "
+                "checkout) and captures a PATCH artifact; pass isolate=true to run in its own "
+                "worktree and branch instead (use it for parallel jobs). Returns job_id immediately. Pass adapter to force one; "
                 "otherwise the enabled platform is used."
             ),
             input_schema=implement_schema(),
@@ -1543,8 +1544,8 @@ def _build_tools() -> list[McpTool]:
                 "tokens. Lightweight SINGLE in-place edit: picks the cheapest sufficient "
                 "model, uses CodeGraph, edits the working tree directly, and returns the "
                 "diff synchronously (no job_id). Captures a reviewable PATCH artifact. "
-                "Use start_implement instead for multi-file/coupled features that want an "
-                "isolated worktree. Keep truly trivial edits (typo/rename/comment) inline."
+                "Use start_implement instead for multi-file/coupled features (isolate=true for "
+                "its own worktree). Keep truly trivial edits (typo/rename/comment) inline."
             ),
             input_schema=edit_schema(),
             handler=run_edit,
@@ -2317,7 +2318,7 @@ def run_cursor(
     if blocked_playbook is not None:
         return blocked_playbook
     if implement:
-        blocked = _worktree_preflight(args)
+        blocked = _full_edit_workspace(args)
         if blocked is not None:
             return blocked
     return run_worker_cli(cursor_command(args, review=review, plan=plan, implement=implement), args)
@@ -2333,7 +2334,7 @@ def start_cursor(
     if blocked_playbook is not None:
         return blocked_playbook
     if implement:
-        blocked = _worktree_preflight(args)
+        blocked = _full_edit_workspace(args)
         if blocked is not None:
             return blocked
     return start_cli(cursor_command(args, review=review, plan=plan, implement=implement), args)
@@ -2373,8 +2374,14 @@ def cursor_command(
     return command
 
 
-def _worktree_preflight(args: JsonObject) -> Optional[JsonObject]:
-    """Fail a full-edit verb fast when its cwd is not inside a git work tree.
+def _full_edit_workspace(args: JsonObject) -> Optional[JsonObject]:
+    """Prepare the checkout a full-edit verb runs in; None means proceed.
+
+    With ``isolate``, the job gets its own worktree and branch first (see
+    :mod:`puppetmaster.isolated_worktree`) and ``args["cwd"]`` points there;
+    the start/run result reports it under ``isolated_worktree``.
+
+    Then fail fast when cwd is not inside a git work tree.
 
     The worker-level guard (:func:`puppetmaster.adapters.worktree_guard`)
     already blocks these runs, but only *after* a worker has spawned — the
@@ -2385,6 +2392,20 @@ def _worktree_preflight(args: JsonObject) -> Optional[JsonObject]:
     return ``None`` and defer to the worker-level guard rather than blocking
     a run the guard might allow.
     """
+    if args.get("isolate"):
+        from puppetmaster.isolated_worktree import create_isolated_worktree
+
+        try:
+            made = create_isolated_worktree(cwd(args), mcp_state_dir(args))
+        except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+            return tool_error(
+                f"Could not create an isolated worktree: {exc}. isolate needs cwd inside a "
+                "git repository with at least one commit.",
+                {"failure": "isolation_failed", "cwd": cwd(args)},
+            )
+        args["cwd"] = made["cwd"]
+        args["_isolation"] = made
+        return None
     if args.get("allow_non_worktree"):
         return None
     directory = cwd(args)
@@ -2543,7 +2564,7 @@ def start_implement(args: JsonObject) -> JsonObject:
         adapter = pick_implement_adapter(enabled, args.get("adapter"))
     except NoImplementAdapterError as exc:
         return _no_implement_tool_error(exc)
-    blocked = _worktree_preflight(args)
+    blocked = _full_edit_workspace(args)
     if blocked is not None:
         return blocked
     result = start_cli(_implement_command(args, adapter), args)
@@ -2685,7 +2706,7 @@ def edit_command(args: JsonObject) -> list[str]:
 def run_edit(args: JsonObject) -> JsonObject:
     """Lightweight single in-place edit — runs SYNCHRONOUSLY and returns the diff.
 
-    Unlike ``start_implement`` (async, isolated worktree, frontier-capable), this
+    Unlike ``start_implement`` (async, frontier-capable, optionally isolated), this
     is the snappy verb for one focused change: cheapest sufficient model, CodeGraph
     to locate the site, edits the working tree in place, and blocks until the diff
     is ready so the caller sees the result immediately. A PATCH artifact is still
@@ -2823,8 +2844,8 @@ def start_prewalk(args: JsonObject) -> JsonObject:
         pick_implement_adapter(enabled, args.get("adapter"))
     except NoImplementAdapterError as exc:
         return _no_implement_tool_error(exc)
-    if not args.get("allow_dirty") and not args.get("allow_non_worktree"):
-        blocked = _worktree_preflight(args)
+    if args.get("isolate") or (not args.get("allow_dirty") and not args.get("allow_non_worktree")):
+        blocked = _full_edit_workspace(args)
         if blocked is not None:
             return blocked
     return start_cli(prewalk_command(args), args)
@@ -2834,7 +2855,7 @@ def run_claude(args: JsonObject) -> JsonObject:
     locked = _platform_lock_preflight("claude-code")
     if locked is not None:
         return locked
-    blocked = _worktree_preflight(args)
+    blocked = _full_edit_workspace(args)
     if blocked is not None:
         return blocked
     return run_worker_cli(claude_command(args), args)
@@ -2844,7 +2865,7 @@ def start_claude(args: JsonObject) -> JsonObject:
     locked = _platform_lock_preflight("claude-code")
     if locked is not None:
         return locked
-    blocked = _worktree_preflight(args)
+    blocked = _full_edit_workspace(args)
     if blocked is not None:
         return blocked
     return start_cli(claude_command(args), args)
@@ -2864,7 +2885,7 @@ def run_codex(args: JsonObject) -> JsonObject:
     if locked is not None:
         return locked
     if _codex_is_write_capable(args):
-        blocked = _worktree_preflight(args)
+        blocked = _full_edit_workspace(args)
         if blocked is not None:
             return blocked
     return run_worker_cli(codex_command(args), args)
@@ -2875,7 +2896,7 @@ def start_codex(args: JsonObject) -> JsonObject:
     if locked is not None:
         return locked
     if _codex_is_write_capable(args):
-        blocked = _worktree_preflight(args)
+        blocked = _full_edit_workspace(args)
         if blocked is not None:
             return blocked
     return start_cli(codex_command(args), args)
@@ -2891,7 +2912,7 @@ def run_agentic(args: JsonObject) -> JsonObject:
     if locked is not None:
         return locked
     if _agentic_is_write_capable(args):
-        blocked = _worktree_preflight(args)
+        blocked = _full_edit_workspace(args)
         if blocked is not None:
             return blocked
     return run_worker_cli(agentic_command(args), args)
@@ -2902,7 +2923,7 @@ def start_agentic(args: JsonObject) -> JsonObject:
     if locked is not None:
         return locked
     if _agentic_is_write_capable(args):
-        blocked = _worktree_preflight(args)
+        blocked = _full_edit_workspace(args)
         if blocked is not None:
             return blocked
     return start_cli(agentic_command(args), args)
@@ -3835,7 +3856,12 @@ def run_worker_cli(command: list[str], args: JsonObject) -> JsonObject:
     poll-for-result, which is the only delivery Codex can actually complete.
     """
     if not _should_autodetach_worker(args):
-        return run_cli(command, args)
+        result = run_cli(command, args)
+        if args.get("_isolation") and isinstance(result, dict) and isinstance(result.get("content"), list):
+            result["content"].append(
+                {"type": "text", "text": json.dumps({"isolated_worktree": args["_isolation"]}, indent=2)}
+            )
+        return result
     result = start_cli(command, args)
     if isinstance(result, dict) and not result.get("isError"):
         content = result.get("content")
@@ -4555,6 +4581,8 @@ def start_cli(command: list[str], args: JsonObject) -> JsonObject:
             f"Call puppetmaster_show with job_id={job_id} after completion",
         ],
     }
+    if args.get("_isolation"):
+        body["isolated_worktree"] = args["_isolation"]
     return {"content": [{"type": "text", "text": json.dumps(body, indent=2)}], "isError": False}
 
 
@@ -5528,6 +5556,17 @@ def codex_schema() -> JsonObject:
                 "default": False,
                 "description": "Allow Codex to run in a dirty working tree.",
             },
+            "isolate": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Run this job in its own git worktree on a new pm/implement-* branch cut "
+                    "from HEAD (under the Puppetmaster state dir), with node_modules/.venv "
+                    "linked in. Parallel jobs on one repo then never collide and never touch "
+                    "your checkout; the worker's commits land on that branch for you to merge. "
+                    "Uncommitted changes in your checkout are not carried over."
+                ),
+            },
             "allow_non_worktree": {
                 "type": "boolean",
                 "default": False,
@@ -5585,6 +5624,17 @@ def claude_schema() -> JsonObject:
                 "default": False,
                 "description": "Allow Claude Code to run in a dirty working tree.",
             },
+            "isolate": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Run this job in its own git worktree on a new pm/implement-* branch cut "
+                    "from HEAD (under the Puppetmaster state dir), with node_modules/.venv "
+                    "linked in. Parallel jobs on one repo then never collide and never touch "
+                    "your checkout; the worker's commits land on that branch for you to merge. "
+                    "Uncommitted changes in your checkout are not carried over."
+                ),
+            },
             "allow_non_worktree": {
                 "type": "boolean",
                 "default": False,
@@ -5616,6 +5666,17 @@ def cursor_implement_schema() -> JsonObject:
                 "type": "boolean",
                 "default": False,
                 "description": "Allow the implement run to start in a dirty working tree.",
+            },
+            "isolate": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Run this job in its own git worktree on a new pm/implement-* branch cut "
+                    "from HEAD (under the Puppetmaster state dir), with node_modules/.venv "
+                    "linked in. Parallel jobs on one repo then never collide and never touch "
+                    "your checkout; the worker's commits land on that branch for you to merge. "
+                    "Uncommitted changes in your checkout are not carried over."
+                ),
             },
             "allow_non_worktree": {
                 "type": "boolean",
@@ -5868,6 +5929,17 @@ def prewalk_schema() -> JsonObject:
                 "type": "boolean",
                 "description": "Allow the implement worker in a dirty working tree.",
             },
+            "isolate": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Run this job in its own git worktree on a new pm/implement-* branch cut "
+                    "from HEAD (under the Puppetmaster state dir), with node_modules/.venv "
+                    "linked in. Parallel jobs on one repo then never collide and never touch "
+                    "your checkout; the worker's commits land on that branch for you to merge. "
+                    "Uncommitted changes in your checkout are not carried over."
+                ),
+            },
             "allow_non_worktree": {
                 "type": "boolean",
                 "description": "Allow implement outside a git work tree.",
@@ -5943,6 +6015,17 @@ def agentic_schema() -> JsonObject:
                 "type": "boolean",
                 "default": False,
                 "description": "Allow the run in a dirty working tree.",
+            },
+            "isolate": {
+                "type": "boolean",
+                "default": False,
+                "description": (
+                    "Run this job in its own git worktree on a new pm/implement-* branch cut "
+                    "from HEAD (under the Puppetmaster state dir), with node_modules/.venv "
+                    "linked in. Parallel jobs on one repo then never collide and never touch "
+                    "your checkout; the worker's commits land on that branch for you to merge. "
+                    "Uncommitted changes in your checkout are not carried over."
+                ),
             },
             "allow_non_worktree": {
                 "type": "boolean",

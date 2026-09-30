@@ -84,6 +84,8 @@ If it returns `failure=dirty_worktree`, run from a clean repo/worktree or set `p
 
 Default permission mode is `acceptEdits`, which is intentionally edit-capable. Use `bypassPermissions` only in isolated worktrees or disposable sandboxes.
 
+A headless `acceptEdits` run cannot answer permission prompts, so any shell command without an allow rule is refused. Unless the payload sets `allowed_tools`, write-capable runs get a default allow-list for verifying and committing their own work: local git (`status`, `diff`, `log`, `show`, `add`, `commit`, `restore`) and the usual test/typecheck runners (`npx tsc`/`vitest`/`eslint`, `npm`/`pnpm` scripts, `pytest`, `unittest`, `uv run`, `make test`, `go test`, `cargo test`/`check`). `git push`, network and destructive commands stay refused. An explicit `allowed_tools` replaces the default.
+
 ```json
 {
   "role": "claude-implement",
