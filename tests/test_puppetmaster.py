@@ -9437,7 +9437,11 @@ class ModelRouterTests(unittest.TestCase):
             role="audit",
             explicit_max_cost_usd=0.01,
         )
-        decision = route_task(signal, self._three_tier_registry(), policy="balanced")
+        # Pay-as-you-go pricing: left unset, billing comes from the host, and a
+        # machine logged in to a Claude plan prices claude-code at $0 marginal,
+        # which rightly fits any cash budget.
+        registry = [replace(spec, billing="api") for spec in self._three_tier_registry()]
+        decision = route_task(signal, registry, policy="balanced")
         # Frontier is over budget; mid and cheap remain.
         rejected_ids = {spec.id for spec, _ in decision.rejected}
         self.assertIn("frontier-model", rejected_ids)
@@ -25562,7 +25566,7 @@ class InvocationGateTests(unittest.TestCase):
 
         d = should_delegate("refactor the auth module across the whole codebase")
         directive = d.directive()
-        self.assertIn("clean worktree", directive)
+        self.assertIn("clean checkout", directive)
         self.assertIn("not a", directive.lower())
         self.assertNotIn("fan it out to a swarm", directive)
 
