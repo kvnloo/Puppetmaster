@@ -533,7 +533,11 @@ def implement_report_artifacts(
     if not report:
         return parsed
     headline = next(
-        (line.strip().lstrip("#").strip() for line in report.splitlines() if line.strip()),
+        (
+            line.strip().lstrip("#").strip()
+            for line in report.splitlines()
+            if line.strip() and not line.strip().startswith("```")
+        ),
         "Worker report",
     )
     return [
@@ -624,6 +628,24 @@ def parse_cursor_artifact_payload(result_text: object) -> Optional[Any]:
     return _json_prefix_decode(text)
 
 
+# Workers name an item's one-line gist in different keys. An explicitly typed
+# item may use any of them and is never dropped; an untyped (wrapped or
+# inferred) item must carry a strict primary key, else it is malformed.
+_STRICT_HEADLINE_KEYS = ("claim", "summary")
+_HEADLINE_KEYS = ("claim", "summary", "title", "headline", "symptom", "issue", "problem", "description", "detail")
+
+
+def _item_headline(payload: dict, *primary: str, declared: bool) -> Optional[str]:
+    for key in (*primary, *(_HEADLINE_KEYS if declared else _STRICT_HEADLINE_KEYS)):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    if not declared:
+        return None
+    where = ":".join(str(payload[k]) for k in ("file", "line") if payload.get(k) not in (None, ""))
+    return f"Unnamed item at {where}" if where else "Unnamed item"
+
+
 def cursor_artifact_from_item(
     task: Task,
     worker_id: str,
@@ -638,7 +660,10 @@ def cursor_artifact_from_item(
     # Unwrap ONLY when top-level type is absent — otherwise a typed artifact
     # that happens to carry a nested finding/risk/decision dict would be
     # clobbered (e.g. claim stolen from the nested object).
-    if not str(item.get("type") or "").strip():
+    # Only an item the worker explicitly typed gets the broad headline aliases
+    # and is never dropped; wrapped or inferred items keep the strict keys.
+    declared = bool(str(item.get("type") or "").strip())
+    if not declared:
         wrapped_type = next(
             (
                 kind
@@ -665,23 +690,23 @@ def cursor_artifact_from_item(
     payload = {key: value for key, value in item.items() if key not in {"type", "evidence", "confidence"}}
 
     if artifact_type == "finding":
-        claim = payload.get("claim") or payload.get("finding") or payload.get("summary")
-        if not claim:
+        claim = _item_headline(payload, "claim", "finding", declared=declared)
+        if claim is None:
             return None
-        payload["claim"] = str(claim)
+        payload["claim"] = claim
         kind = ArtifactType.FINDING
     elif artifact_type == "risk":
-        risk = payload.get("risk") or payload.get("claim") or payload.get("summary")
-        if not risk:
+        risk = _item_headline(payload, "risk", declared=declared)
+        if risk is None:
             return None
-        payload["risk"] = str(risk)
+        payload["risk"] = risk
         payload["mitigation"] = str(payload.get("mitigation") or "Review and verify before implementation.")
         kind = ArtifactType.RISK
     else:
-        decision = payload.get("decision") or payload.get("claim") or payload.get("summary")
-        if not decision:
+        decision = _item_headline(payload, "decision", declared=declared)
+        if decision is None:
             return None
-        payload["decision"] = str(decision)
+        payload["decision"] = decision
         payload["why"] = str(payload.get("why") or "Recommended by automated analysis.")
         kind = ArtifactType.DECISION
 

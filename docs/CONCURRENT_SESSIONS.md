@@ -71,7 +71,16 @@ same time. The jobs can race after their clean-tree checks and each job can
 mistake the other's edits for its own patch.
 
 Use one write-capable job per checkout, or give each concurrent write job its
-own Git worktree:
+own Git worktree. From MCP, pass `isolate: true` to a full-edit verb
+(`puppetmaster_start_implement`, `_start_claude_implement`,
+`_start_cursor_implement`, `_start_codex`) and Puppetmaster does this for you:
+the job runs in its own worktree on a new `pm/implement-*` branch cut from
+HEAD under the state dir, with `node_modules`/`.venv` linked in, and the start
+result reports `isolated_worktree` (path, branch, base). The worker's commits
+land on that branch for you to review and merge; the worktree is never removed
+automatically. Uncommitted changes in your checkout are not carried over.
+
+By hand:
 
 ```bash
 git worktree add ../project-fix-a -b fix-a

@@ -160,7 +160,8 @@ _ROLE_INFERENCE = [
 ]
 _DEFAULT_VERB = "puppetmaster_start_swarm"
 
-# Verbs that run a single edit-capable worker in an isolated worktree. These
+# Verbs that run a single edit-capable worker in a clean checkout (or, with
+# isolate=true, its own worktree and branch). These
 # must NOT be described as a "fan-out swarm": the whole point is that a coupled
 # implementation lands as one coherent change (one branch, one PATCH artifact)
 # instead of parallel editors stacking commits that are unaware of each other.
@@ -173,7 +174,7 @@ _IMPLEMENT_VERBS = frozenset(
 )
 
 # The lightweight single in-place edit verb. Distinct from the implement verbs:
-# synchronous, edits the working tree directly (no isolated worktree), cheapest
+# synchronous, edits the working tree directly (no clean-tree guard), cheapest
 # sufficient model, returns the diff. The gate steers a *focused* implement
 # intent (no broad-scope signal) here instead of the heavier implement job.
 _EDIT_VERB = "puppetmaster_edit"
@@ -230,7 +231,7 @@ class DelegationDecision:
         host to "fan it out to a swarm" for *every* delegated task — including
         single implementations, which is exactly the misfire that makes parallel
         workers stack uncoordinated commits. So implementation work is steered
-        to one worker in a clean worktree, lookups to CodeGraph, and only
+        to one worker in a clean checkout, lookups to CodeGraph, and only
         genuinely read-only analysis to a swarm.
         """
         if not self.should_delegate:
@@ -246,9 +247,9 @@ class DelegationDecision:
                 f"diff. It edits your live working tree (including uncommitted "
                 f"changes), so it's the right verb for last-mile work that builds "
                 f"on what's already there — `puppetmaster_start_implement` "
-                f"branches off HEAD in an isolated worktree and would miss it. "
-                f"It's the snappy path between editing inline yourself and a full "
-                f"implement job; no isolated worktree, no job to poll. Reach for "
+                f"needs a clean checkout (and with isolate=true starts from HEAD), "
+                f"so it would miss it. It's the snappy path between editing inline "
+                f"yourself and a full implement job; no clean-tree guard, no job to poll. Reach for "
                 f"`puppetmaster_start_implement` instead only if this grows into a "
                 f"coupled multi-file change that doesn't depend on uncommitted "
                 f"state. {tail}"
@@ -257,7 +258,8 @@ class DelegationDecision:
             body = (
                 f"[Puppetmaster] This is a single implementation task (capability "
                 f"{self.capability_score}, {self.reason}). Delegate it to ONE "
-                f"implement worker in a clean worktree via `{verb}` — not a "
+                f"implement worker in a clean checkout via `{verb}` (isolate=true "
+                f"gives it its own worktree and branch) — not a "
                 f"fan-out swarm. A single worker keeps the change coherent and "
                 f"captures a PATCH artifact; parallel editors stack commits that "
                 f"are unaware of each other. Reserve swarms for the "
@@ -394,7 +396,7 @@ def should_delegate(
     # lightweight in-place ``edit`` verb (cheap model, CodeGraph, inline diff)
     # rather than the heavier ``start_implement`` worktree job. Broad scope
     # ("across the repo", "every caller", refactor/migrate) keeps the implement
-    # verb, where an isolated worktree + one coherent PATCH is the right shape.
+    # verb, where one worker + one coherent PATCH is the right shape.
     if suggested_verb in _IMPLEMENT_VERBS and not has_hard_scope:
         suggested_verb = _EDIT_VERB
 

@@ -195,7 +195,7 @@ class ClaudeCodeAdapter(CliWorkerAdapter):
             model=model_for_cli,
             output_format=task.payload.get("output_format", "json"),
             permission_mode=effective_permission_mode,
-            allowed_tools=task.payload.get("allowed_tools"),
+            allowed_tools=implement_allowed_tools(task.payload, write_capable=write_capable),
             disallowed_tools=task.payload.get("disallowed_tools"),
             extra_args=task.payload.get("extra_args", []),
         )
@@ -387,6 +387,33 @@ class ClaudeCodeAdapter(CliWorkerAdapter):
                 )
             )
         return artifacts
+
+
+# A headless full-edit run has nobody to answer a permission prompt, so under
+# acceptEdits every shell command without an allow rule is refused: the worker
+# could edit but never typecheck, test or commit its own work, and handed back
+# unverified, uncommitted diffs. These rules let it verify and commit locally;
+# anything else (push, network, rm) stays refused. An explicit allowed_tools
+# payload replaces the default.
+IMPLEMENT_VERIFY_TOOLS = (
+    "Bash(cd:*)", "Bash(ls:*)", "Bash(pwd)",
+    "Bash(git status:*)", "Bash(git diff:*)", "Bash(git log:*)", "Bash(git show:*)",
+    "Bash(git add:*)", "Bash(git commit:*)", "Bash(git restore:*)", "Bash(git stash list:*)",
+    "Bash(npx tsc:*)", "Bash(npx vitest:*)", "Bash(npx eslint:*)", "Bash(npx vite build:*)",
+    "Bash(npm test:*)", "Bash(npm run:*)", "Bash(pnpm test:*)", "Bash(pnpm run:*)", "Bash(yarn test:*)",
+    "Bash(pytest:*)", "Bash(python -m pytest:*)", "Bash(python3 -m pytest:*)",
+    "Bash(python -m unittest:*)", "Bash(python3 -m unittest:*)",
+    "Bash(.venv/bin/python -m pytest:*)", "Bash(.venv/bin/python -m unittest:*)",
+    "Bash(uv run:*)", "Bash(make test:*)", "Bash(go test:*)", "Bash(go vet:*)",
+    "Bash(cargo test:*)", "Bash(cargo check:*)",
+)
+
+
+def implement_allowed_tools(payload: dict, *, write_capable: bool) -> object:
+    explicit = payload.get("allowed_tools")
+    if explicit is not None or not write_capable:
+        return explicit
+    return list(IMPLEMENT_VERIFY_TOOLS)
 
 
 def build_claude_code_command(
