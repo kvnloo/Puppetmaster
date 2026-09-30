@@ -2882,7 +2882,7 @@ class PuppetmasterTests(unittest.TestCase):
             "content": [{"type": "text", "text": json.dumps(start_body)}],
             "isError": False,
         }
-        with patch.object(mcp_server, "_worktree_preflight", return_value=None), patch.object(
+        with patch.object(mcp_server, "_full_edit_workspace", return_value=None), patch.object(
             mcp_server, "_should_autodetach_worker", return_value=True
         ), patch.object(mcp_server, "start_cli", return_value=start_result), patch.object(
             mcp_server, "run_cli"
@@ -26359,10 +26359,10 @@ class WorktreePreflightTests(unittest.TestCase):
     """Full-edit MCP verbs refuse non-git cwds at the verb, not after spawn."""
 
     def test_non_worktree_cwd_fails_fast_with_remediation(self):
-        from puppetmaster.mcp_server import _worktree_preflight
+        from puppetmaster.mcp_server import _full_edit_workspace
 
         with TemporaryDirectory() as tmp:
-            result = _worktree_preflight({"cwd": tmp})
+            result = _full_edit_workspace({"cwd": tmp})
             self.assertIsNotNone(result)
             self.assertTrue(result.get("isError"))
             text = result["content"][0]["text"]
@@ -26371,17 +26371,17 @@ class WorktreePreflightTests(unittest.TestCase):
             self.assertIn("allow_non_worktree", text)
 
     def test_allow_non_worktree_skips_preflight(self):
-        from puppetmaster.mcp_server import _worktree_preflight
+        from puppetmaster.mcp_server import _full_edit_workspace
 
         with TemporaryDirectory() as tmp:
-            self.assertIsNone(_worktree_preflight({"cwd": tmp, "allow_non_worktree": True}))
+            self.assertIsNone(_full_edit_workspace({"cwd": tmp, "allow_non_worktree": True}))
 
     def test_git_repo_cwd_passes_preflight(self):
-        from puppetmaster.mcp_server import _worktree_preflight
+        from puppetmaster.mcp_server import _full_edit_workspace
 
         with TemporaryDirectory() as tmp:
             subprocess.run(["git", "init", "-q"], cwd=tmp, check=True, capture_output=True)
-            self.assertIsNone(_worktree_preflight({"cwd": tmp}))
+            self.assertIsNone(_full_edit_workspace({"cwd": tmp}))
 
     def test_codex_read_only_sandbox_is_exempt(self):
         from puppetmaster.mcp_server import _codex_is_write_capable

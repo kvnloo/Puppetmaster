@@ -112,7 +112,7 @@ class StartImplementMcpGrokBotTests(unittest.TestCase):
         ), patch(
             "puppetmaster.workers.adapter_is_available",
             side_effect=lambda name, **_: name == "agentic",
-        ), patch.object(mcp_server, "_worktree_preflight", return_value=None), patch.object(
+        ), patch.object(mcp_server, "_full_edit_workspace", return_value=None), patch.object(
             mcp_server, "start_cli", side_effect=fake_start_cli
         ):
             result = mcp_server.start_implement({"goal": "ship it", "cwd": "."})
