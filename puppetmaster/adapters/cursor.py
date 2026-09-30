@@ -533,7 +533,11 @@ def implement_report_artifacts(
     if not report:
         return parsed
     headline = next(
-        (line.strip().lstrip("#").strip() for line in report.splitlines() if line.strip()),
+        (
+            line.strip().lstrip("#").strip()
+            for line in report.splitlines()
+            if line.strip() and not line.strip().startswith("```")
+        ),
         "Worker report",
     )
     return [
@@ -624,6 +628,20 @@ def parse_cursor_artifact_payload(result_text: object) -> Optional[Any]:
     return _json_prefix_decode(text)
 
 
+# Workers name an item's one-line gist in different keys; an explicitly typed
+# item is never dropped for using another one.
+_HEADLINE_KEYS = ("claim", "summary", "title", "headline", "symptom", "issue", "problem", "description", "detail")
+
+
+def _item_headline(payload: dict, *primary: str) -> str:
+    for key in (*primary, *_HEADLINE_KEYS):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    where = ":".join(str(payload[k]) for k in ("file", "line") if payload.get(k) not in (None, ""))
+    return f"Unnamed item at {where}" if where else "Unnamed item"
+
+
 def cursor_artifact_from_item(
     task: Task,
     worker_id: str,
@@ -665,23 +683,15 @@ def cursor_artifact_from_item(
     payload = {key: value for key, value in item.items() if key not in {"type", "evidence", "confidence"}}
 
     if artifact_type == "finding":
-        claim = payload.get("claim") or payload.get("finding") or payload.get("summary")
-        if not claim:
-            return None
-        payload["claim"] = str(claim)
+        payload["claim"] = _item_headline(payload, "claim", "finding")
         kind = ArtifactType.FINDING
     elif artifact_type == "risk":
-        risk = payload.get("risk") or payload.get("claim") or payload.get("summary")
-        if not risk:
-            return None
-        payload["risk"] = str(risk)
+        risk = _item_headline(payload, "risk")
+        payload["risk"] = risk
         payload["mitigation"] = str(payload.get("mitigation") or "Review and verify before implementation.")
         kind = ArtifactType.RISK
     else:
-        decision = payload.get("decision") or payload.get("claim") or payload.get("summary")
-        if not decision:
-            return None
-        payload["decision"] = str(decision)
+        payload["decision"] = _item_headline(payload, "decision")
         payload["why"] = str(payload.get("why") or "Recommended by automated analysis.")
         kind = ArtifactType.DECISION
 
