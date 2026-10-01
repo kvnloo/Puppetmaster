@@ -588,9 +588,9 @@ def _pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
     if os.name == "nt":
-        from puppetmaster.liveness import _pid_alive_windows
+        from puppetmaster.win_process import pid_alive_windows
 
-        return _pid_alive_windows(pid)
+        return pid_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
