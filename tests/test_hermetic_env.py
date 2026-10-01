@@ -18,6 +18,15 @@ from puppetmaster.platform_lock import KNOWN_ADAPTERS, ONLY_ENV
 
 
 class HermeticEnvIsolationTests(unittest.TestCase):
+    def test_app_state_root_is_isolated_from_the_host(self):
+        # Store discovery scans app_state_root()/projects. Unisolated, the suite
+        # opened and wrote into the developer's real Puppetmaster state (macOS
+        # has no env override), and job lookups depended on what lived there.
+        from puppetmaster import state
+        isolated = Path(hermetic_env._ISOLATION_TMP).resolve()
+        self.assertIn(isolated, state.app_state_root().resolve().parents)
+        self.assertIn(isolated, state.projects_root().resolve().parents)
+
     def test_models_path_points_at_missing_sentinel(self) -> None:
         path = Path(os.environ["PUPPETMASTER_MODELS_PATH"])
         self.assertFalse(path.is_file())

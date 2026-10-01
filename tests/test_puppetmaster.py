@@ -300,7 +300,8 @@ class PuppetmasterTests(unittest.TestCase):
             resolved = resolve_state_dir(cwd=workspace)
 
             self.assertNotEqual(resolved, workspace / ".puppetmaster")
-            self.assertIn("puppetmaster", str(resolved))
+            from puppetmaster.state import projects_root
+            self.assertEqual(resolved.parent, projects_root())
 
     def test_state_dir_env_override_can_be_workspace_relative(self) -> None:
         with TemporaryDirectory() as tmp:

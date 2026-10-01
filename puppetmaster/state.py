@@ -70,7 +70,13 @@ def project_state_dir_for(workspace: Union[Path, str]) -> Path:
     return projects_root() / f"{slug}-{digest}"
 
 
+APP_STATE_ROOT_ENV = "PUPPETMASTER_APP_STATE_ROOT"
+
+
 def app_state_root() -> Path:
+    override = os.environ.get(APP_STATE_ROOT_ENV)
+    if override:
+        return Path(override).expanduser()
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "puppetmaster"
     if os.name == "nt":
