@@ -272,8 +272,10 @@ class MarionetteBlockerTests(unittest.TestCase):
                 # real rejection with a short budget; virtual-clock tests cover
                 # exhaustion of the full production deadline.
                 with patch.object(SQLiteSwarmStore, 'busy_timeout_ms', 100):
-                    if os.name == 'nt' and store.backend_name == 'sqlite':
-                        attached = create_store('sqlite', store.root, mode='attach')
+                    if os.name == 'nt':
+                        # Windows worker attach joins the committed WAL snapshot
+                        # on both backends; the uncommitted row stays invisible.
+                        attached = create_store(store.backend_name, store.root, mode='attach')
                         self.assertEqual(attached._incarnation, store._incarnation)
                     else:
                         with self.assertRaises(ReadUnavailable):

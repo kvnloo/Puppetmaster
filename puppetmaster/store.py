@@ -2786,9 +2786,9 @@ class SwarmStore(StoreContracts):
         Same binding as SQLite attach: a supervisor mid-transaction delays a
         worker's first read, it does not fail worker startup.
         """
-        from puppetmaster.sqlite_store import _SQLITE_BUSY_TIMEOUT_MS, _SQLITE_LOCK_RETRY_ATTEMPTS
-        self._read_incarnation(attach_deadline=time.monotonic()
-                               + _SQLITE_BUSY_TIMEOUT_MS / 1000 * _SQLITE_LOCK_RETRY_ATTEMPTS)
+        from puppetmaster.sqlite_store import SQLiteSwarmStore, _SQLITE_LOCK_RETRY_ATTEMPTS
+        budget = SQLiteSwarmStore.busy_timeout_ms / 1000 * _SQLITE_LOCK_RETRY_ATTEMPTS
+        self._read_incarnation(attach_deadline=time.monotonic() + budget)
 
     def _read_incarnation(self, attach_deadline=None):
         from puppetmaster.identity import read_identity
