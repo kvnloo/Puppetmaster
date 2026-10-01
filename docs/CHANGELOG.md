@@ -1,3 +1,20 @@
+## v1.27.35 — 2026-09-30
+
+**Workers no longer fail startup or teardown because Windows was slow.**
+
+- A readonly helper whose process was already reaped could still fail its
+  close with `reader thread remains alive`: terminate and wait under load
+  spent the whole teardown budget, and the reader thread was then given zero
+  time to return. The reader's exit now has its own grace, and its exit
+  signal counts even before the thread finishes returning. A successful
+  worker attach no longer turns into a failure at close.
+- File-backend workers attached with the 5s ordinary read, so a supervisor
+  mid-transaction failed worker startup with `active reader; sidecars may
+  be missing`. They now bind with the same attach budget as SQLite-backend
+  workers (`SwarmStore.attach()`).
+- Readonly fault-injection tests close the helpers they retain, so the
+  idle-reap test no longer depends on test order.
+
 ## v1.27.34 — 2026-09-30
 
 **Implement workers verify and commit their own work; parallel jobs can isolate; worker reports keep every finding.**

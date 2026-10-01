@@ -2778,14 +2778,27 @@ class SwarmStore(StoreContracts):
 
     @property
     def incarnation(self):
+        return self._read_incarnation()
+
+    def attach(self) -> None:
+        """Worker-safe open: bind identity with the worker attach budget.
+
+        Same binding as SQLite attach: a supervisor mid-transaction delays a
+        worker's first read, it does not fail worker startup.
+        """
+        from puppetmaster.sqlite_store import _SQLITE_BUSY_TIMEOUT_MS, _SQLITE_LOCK_RETRY_ATTEMPTS
+        self._read_incarnation(attach_deadline=time.monotonic()
+                               + _SQLITE_BUSY_TIMEOUT_MS / 1000 * _SQLITE_LOCK_RETRY_ATTEMPTS)
+
+    def _read_incarnation(self, attach_deadline=None):
         from puppetmaster.identity import read_identity
         from puppetmaster.projections import connection
         import sqlite3
         from puppetmaster.readonly import ReadUnavailable
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 5 if attach_deadline is None else attach_deadline
         while True:
             try:
-                with connection(self, metadata_only=True) as c:
+                with connection(self, metadata_only=True, attach_deadline=attach_deadline) as c:
                     return read_identity(c, self.backend_name)
             except (sqlite3.OperationalError, ReadUnavailable, OSError) as exc:
                 from puppetmaster.readonly import _source_open_contention

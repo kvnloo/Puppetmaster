@@ -77,6 +77,27 @@ class LifecycleTests(unittest.TestCase):
         self.assertFalse(transport.reader.is_alive())
         self.assertTrue(transport.reader_exited.is_set())
 
+    def test_reaped_helper_with_exited_reader_closes_on_a_spent_budget(self):
+        # CI shape: terminate+wait spends the whole teardown budget, and the
+        # reader has run its finally (no pipe access left) but has not yet
+        # returned. That is a completed teardown, not "thread remains alive".
+        transport = readonly._Transport(self.store.db_path)
+        transport.ready(time.monotonic() + 5)
+        lingering = threading.Event()
+        class LingeringExit(threading.Event):
+            def set(event):
+                super().set()
+                lingering.wait(5)
+        transport.reader_exited = LingeringExit()
+        self.addCleanup(lingering.set)
+        transport.process.kill()
+        transport.process.wait(5)
+        self.assertTrue(transport.reader_exited.wait(5))
+        self.assertTrue(transport.reader.is_alive())
+        transport.close(deadline=time.monotonic())
+        self.assertEqual(transport.state, readonly._TransportState.CLOSED)
+        readonly._cleanup.retire(transport.token)
+
     def test_partial_native_thread_start_cannot_report_closed(self):
         if not hasattr(threading, '_start_new_thread'):
             self.skipTest('CPython 3.9/3.12 thread startup seam')

@@ -1,9 +1,14 @@
+import sys
 import unittest
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from puppetmaster import readonly
 from puppetmaster.sqlite_store import SQLiteSwarmStore
+
+sys.path.insert(0, str(Path(__file__).parent))
+from readonly_fixtures import close_new_cleanup_owners  # noqa: E402
 
 
 def admitted_process(root, barrier, active, peak):
@@ -39,6 +44,9 @@ def admitted_process(root, barrier, active, peak):
 
 
 class AdmissionTests(unittest.TestCase):
+    def setUp(self):
+        close_new_cleanup_owners(self)
+
     def test_gc_only_retires_and_slot_lookup_never_closes_other_database(self):
         import gc
         import weakref
