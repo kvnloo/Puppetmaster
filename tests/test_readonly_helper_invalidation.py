@@ -12,7 +12,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).parent))
 import hermetic_env  # noqa: F401
 
-from readonly_fixtures import damaged_sidecars
+from readonly_fixtures import close_new_cleanup_owners, damaged_sidecars
 
 from puppetmaster import readonly, state
 from puppetmaster.identity import StoreIdentityError
@@ -21,6 +21,7 @@ from puppetmaster.sqlite_store import SQLiteSwarmStore
 
 class HelperInvalidationTests(unittest.TestCase):
     def setUp(self):
+        close_new_cleanup_owners(self)
         self.directory = TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         self.store = SQLiteSwarmStore(Path(self.directory.name) / 'state')

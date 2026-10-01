@@ -115,6 +115,9 @@ class _TransportState(IntEnum):
     CLOSED = 5
 
 
+_READER_EXIT_GRACE = 5.0
+
+
 class _Transport:
     """Store-lifetime helper; idle helpers own pipes, never source descriptors."""
     def __init__(self, path, deadline=None):
@@ -215,10 +218,16 @@ class _Transport:
         self.state = max(self.state, _TransportState.REAPED)
         if self._reader_attempted and not self.reader._started.wait(timeout=remaining()):
             raise ReadUnavailable('reader thread exit unconfirmed')
+        # The reaped helper's pipe is at EOF, so the reader is already leaving.
+        # Confirm on its own grace: under load terminate+wait can spend
+        # the whole budget. Done means reader_exited (set in its finally,
+        # after the last pipe read) or a dead thread (target never ran).
         if self.reader is not None and self.reader.ident is not None:
-            self.reader.join(timeout=remaining())
-            if self.reader.is_alive():
-                raise ReadUnavailable('reader thread remains alive')
+            exit_deadline = time.monotonic() + max(remaining(), _READER_EXIT_GRACE)
+            while not self.reader_exited.is_set() and self.reader.is_alive():
+                if time.monotonic() >= exit_deadline:
+                    raise ReadUnavailable('reader thread remains alive')
+                self.reader.join(timeout=.01)
         self.state = max(self.state, _TransportState.READER_EXITED)
         if not self.process.stdin.closed:
             self.process.stdin.close()

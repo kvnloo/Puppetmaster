@@ -71,3 +71,18 @@ class ProtocolTransport:
 
     def ready(self, deadline):
         pass
+
+
+def close_new_cleanup_owners(test):
+    """Close helpers a test left in the process-wide cleanup registry.
+
+    Fault-injection tests retain owners on purpose. Left behind, they are what
+    the next read's one-owner idle sweep reaps, not the caller's own helper.
+    """
+    from puppetmaster import readonly
+    before = set(readonly._cleanup.owners)
+
+    def close():
+        for token in set(readonly._cleanup.owners) - before:
+            readonly._cleanup.close(token)
+    test.addCleanup(close)

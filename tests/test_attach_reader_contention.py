@@ -210,3 +210,35 @@ class HelperSpawnGateTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class FileBackendAttachBudgetTests(unittest.TestCase):
+    def test_file_worker_attach_outlasts_an_ordinary_read_budget(self):
+        # An open transaction in another process blocks readonly binding until it
+        # closes. SQLite-backend attach waits out its full attach budget; the
+        # file backend used the 5s ordinary read and failed worker startup
+        # ("active reader; sidecars may be missing") under supervisor churn.
+        import subprocess
+        from puppetmaster.store import SwarmStore
+        from puppetmaster.store_factory import create_worker_store
+        with TemporaryDirectory() as root:
+            supervisor = SwarmStore(root)
+            supervisor.init()
+            hold = 7
+            holder = subprocess.Popen(
+                [sys.executable, '-c',
+                 'import sqlite3, sys, time\n'
+                 'c = sqlite3.connect(sys.argv[1], isolation_level=None)\n'
+                 'c.execute("BEGIN")\n'
+                 'c.execute("SELECT count(*) FROM sqlite_master").fetchone()\n'
+                 'print("held", flush=True)\n'
+                 'time.sleep(float(sys.argv[2]))\n',
+                 str(Path(root) / 'metadata.sqlite3'), str(hold)],
+                stdout=subprocess.PIPE, text=True)
+            self.addCleanup(holder.wait, 30)
+            self.addCleanup(holder.kill)
+            self.assertEqual(holder.stdout.readline().strip(), 'held')
+            started = time.monotonic()
+            worker = create_worker_store('file', root)
+            self.assertGreater(time.monotonic() - started, hold - 2)
+            self.assertEqual(worker.incarnation, supervisor.incarnation)

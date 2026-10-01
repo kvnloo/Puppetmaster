@@ -34,7 +34,7 @@ def create_store(
         if mode == "ensure":
             store.init()
         elif mode == "attach":
-            store.incarnation
+            store.attach()
         return store
     if backend == "sqlite":
         store = SQLiteSwarmStore(state_dir)
