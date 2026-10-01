@@ -1,3 +1,17 @@
+## v1.27.37 — 2026-10-01
+
+**Windows process calls go through one typed kernel32 binding.**
+
+- Five sites (worker liveness, the CodeGraph lock, the dashboard, MCP
+  registry liveness and process-tree teardown) called the process-global
+  `ctypes.windll.kernel32` untyped. `OpenProcess` and
+  `CreateToolhelp32Snapshot` returned 64-bit HANDLEs as 32-bit int, HANDLE
+  arguments were passed as int, and `ctypes.get_last_error()` never saw the
+  error, so access-denied detection depended on a fallback. `win_process`
+  now owns one `WinDLL` with full signatures and `pid_alive_windows()`;
+  a lint test forbids `ctypes.windll`. The dashboard now treats an
+  access-denied pid as alive, like every other caller.
+
 ## v1.27.36 — 2026-10-01
 
 **A file lock can no longer be held twice, and contract writes survive concurrent writers.**
