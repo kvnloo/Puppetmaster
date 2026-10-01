@@ -1378,7 +1378,8 @@ def _pid_is_alive(pid: int) -> bool:
     if pid <= 0:
         return False
     if sys.platform == "win32":
-        return _pid_is_alive_windows(pid)
+        from puppetmaster.win_process import pid_alive_windows
+        return pid_alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -1388,36 +1389,6 @@ def _pid_is_alive(pid: int) -> bool:
     except OSError:
         return True
     return True
-
-
-def _pid_is_alive_windows(pid: int) -> bool:
-    """Windows liveness probe via the Win32 API (no psutil dependency)."""
-    import ctypes
-    from ctypes import wintypes
-
-    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    STILL_ACTIVE = 259
-    ERROR_ACCESS_DENIED = 5
-    ERROR_INVALID_PARAMETER = 87
-
-    kernel32 = ctypes.windll.kernel32
-    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-    if not handle:
-        err = ctypes.get_last_error() or kernel32.GetLastError()
-        # No such process -> dead. Access denied -> someone else's live process
-        # (mirror POSIX EPERM -> alive so we don't break another user's lock).
-        if err == ERROR_INVALID_PARAMETER:
-            return False
-        if err == ERROR_ACCESS_DENIED:
-            return True
-        return False
-    try:
-        exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            return True
-        return exit_code.value == STILL_ACTIVE
-    finally:
-        kernel32.CloseHandle(handle)
 
 
 # --- Native SQLite health check ---------------------------------------------

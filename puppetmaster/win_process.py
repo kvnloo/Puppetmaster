@@ -20,6 +20,57 @@ import time
 from typing import Iterable, Optional
 
 
+_KERNEL32 = None
+
+
+def _kernel32():
+    """kernel32 with full signatures, never the process-global ``ctypes.windll``.
+
+    Untyped calls truncate 64-bit HANDLE results and arguments to 32-bit int,
+    and windll does not capture the error for ``ctypes.get_last_error()``.
+    """
+    global _KERNEL32
+    if _KERNEL32 is None:
+        import ctypes
+        from ctypes import wintypes
+        api = ctypes.WinDLL("kernel32", use_last_error=True)
+        for name, args, result in (
+            ("OpenProcess", [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD], wintypes.HANDLE),
+            ("GetExitCodeProcess", [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)], wintypes.BOOL),
+            ("TerminateProcess", [wintypes.HANDLE, wintypes.UINT], wintypes.BOOL),
+            ("CloseHandle", [wintypes.HANDLE], wintypes.BOOL),
+            ("CreateToolhelp32Snapshot", [wintypes.DWORD, wintypes.DWORD], wintypes.HANDLE),
+            ("Process32FirstW", [wintypes.HANDLE, ctypes.c_void_p], wintypes.BOOL),
+            ("Process32NextW", [wintypes.HANDLE, ctypes.c_void_p], wintypes.BOOL),
+        ):
+            function = getattr(api, name)
+            function.argtypes, function.restype = args, result
+        _KERNEL32 = api
+    return _KERNEL32
+
+
+def pid_alive_windows(pid: int) -> bool:
+    """Non-destructive liveness probe: ``OpenProcess`` plus the exit code.
+
+    Access denied means the process exists but belongs to someone else, so it
+    counts as alive (POSIX ``EPERM``). ``os.kill(pid, 0)`` is not an option on
+    Windows: it sends CTRL_C_EVENT or terminates the target.
+    """
+    import ctypes
+    from ctypes import wintypes
+    kernel32 = _kernel32()
+    handle = kernel32.OpenProcess(0x1000, False, int(pid))  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        return ctypes.get_last_error() == 5  # ERROR_ACCESS_DENIED
+    try:
+        exit_code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return True
+        return exit_code.value == 259  # STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def kill_process_tree(pid: int) -> bool:
     """Kill ``pid`` and its descendants on Windows.
 
@@ -114,23 +165,23 @@ def _snapshot_children_by_parent() -> Optional[dict[int, list[int]]]:
             ("szExeFile", wintypes.WCHAR * 260),
         ]
 
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    kernel32 = _kernel32()
     invalid = ctypes.c_void_p(-1).value
     snapshot = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-    if not snapshot or int(snapshot) == int(invalid):  # type: ignore[arg-type]
+    if not snapshot or snapshot == invalid:
         return None
 
     children_by_parent: dict[int, list[int]] = {}
     try:
         entry = PROCESSENTRY32W()
         entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
-        if not kernel32.Process32FirstW(snapshot, ctypes.byref(entry)):
+        if not kernel32.Process32FirstW(snapshot, ctypes.addressof(entry)):
             return None
         while True:
             parent = int(entry.th32ParentProcessID)
             child = int(entry.th32ProcessID)
             children_by_parent.setdefault(parent, []).append(child)
-            if not kernel32.Process32NextW(snapshot, ctypes.byref(entry)):
+            if not kernel32.Process32NextW(snapshot, ctypes.addressof(entry)):
                 break
     finally:
         kernel32.CloseHandle(snapshot)
@@ -138,10 +189,8 @@ def _snapshot_children_by_parent() -> Optional[dict[int, list[int]]]:
 
 
 def _terminate_pid(pid: int) -> bool:
-    import ctypes
-
     PROCESS_TERMINATE = 0x0001
-    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+    kernel32 = _kernel32()
     handle = kernel32.OpenProcess(PROCESS_TERMINATE, False, int(pid))
     if not handle:
         return False
