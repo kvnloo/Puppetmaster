@@ -2793,30 +2793,12 @@ class SwarmStore(StoreContracts):
     def _read_incarnation(self, attach_deadline=None):
         from puppetmaster.identity import read_identity
         from puppetmaster.projections import connection
-        import sqlite3
-        from puppetmaster.readonly import ReadUnavailable
-        deadline = time.monotonic() + 5 if attach_deadline is None else attach_deadline
-        while True:
-            try:
-                with connection(self, metadata_only=True, attach_deadline=attach_deadline) as c:
-                    return read_identity(c, self.backend_name)
-            except (sqlite3.OperationalError, ReadUnavailable, OSError) as exc:
-                from puppetmaster.readonly import _source_open_contention
-                transient = (
-                    isinstance(exc, sqlite3.OperationalError)
-                    and str(exc) == 'database is locked'
-                ) or (
-                    isinstance(exc, ReadUnavailable)
-                    and any(reason in str(exc)
-                            for reason in ('source changed', 'active reader', 'live sidecars'))
-                ) or (
-                    isinstance(exc, OSError)
-                    and not isinstance(exc, FileNotFoundError)
-                    and _source_open_contention(exc)
-                )
-                if not transient or time.monotonic() >= deadline:
-                    raise
-                time.sleep(.01)
+        from puppetmaster.readonly import retry_transient
+
+        def read():
+            with connection(self, metadata_only=True, attach_deadline=attach_deadline) as c:
+                return read_identity(c, self.backend_name)
+        return retry_transient(read, time.monotonic() + 5 if attach_deadline is None else attach_deadline)
 
     def _claim_job_ref(self, job_id):
         """Bind a local claim through its store session, including live WAL."""
@@ -2869,8 +2851,12 @@ class SwarmStore(StoreContracts):
         from puppetmaster.identity import validate
         from puppetmaster.projections import connection as open_connection
         if connection is None:
-            with open_connection(self, metadata_only=True) as c:
-                return self.validate_job_ref(job_ref, connection=c, strict=strict)
+            from puppetmaster.readonly import retry_transient
+
+            def read():
+                with open_connection(self, metadata_only=True) as c:
+                    return self.validate_job_ref(job_ref, connection=c, strict=strict)
+            return retry_transient(read, time.monotonic() + 5)
         validate(self, job_ref, connection, strict=strict)
         table = "jobs" if self.backend_name == "sqlite" else "projection_current"
         where = "id=?" if self.backend_name == "sqlite" else "kind='job' AND id=?"

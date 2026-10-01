@@ -734,6 +734,32 @@ def _metadata_fence(before, after):
         raise StoreIdentityError('store source metadata changed during binding')
 
 
+def _transient_read(exc):
+    if isinstance(exc, ReadUnavailable):
+        return not isinstance(exc, ReadTimeout) and any(
+            reason in str(exc) for reason in ('source changed', 'active reader', 'live sidecars'))
+    if isinstance(exc, sqlite3.OperationalError):
+        return str(exc) == 'database is locked'
+    return not isinstance(exc, FileNotFoundError) and _source_open_contention(exc)
+
+
+def retry_transient(read, deadline):
+    """Run a control-plane read, retrying source contention until deadline.
+
+    Ordinary listing reads stay fail-fast and report unavailable. Identity and
+    contract reads must not fail because a concurrent writer held or moved
+    the source while the helper opened it. Replacement still raises: the
+    retry reopens through the identity fence.
+    """
+    while True:
+        try:
+            return read()
+        except (sqlite3.OperationalError, OSError) as exc:
+            if not _transient_read(exc) or time.monotonic() >= deadline:
+                raise
+            time.sleep(.01)
+
+
 def connect(store, *, timeout=5, reuse=False, launch_binding=False, attach_binding=False,
             attach_deadline=None):
     from puppetmaster.identity import StoreIdentityError
