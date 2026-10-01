@@ -466,6 +466,36 @@ class StoreContractTests(unittest.TestCase):
             reopened.observe_cancellation(ref, binding)
             self.assertEqual(reopened.get_cancellation_receipt(ref, "cancel_1").outcome, "observed_stop")
 
+    def test_contract_writes_survive_a_source_move_during_their_precheck(self):
+        # Windows CI: a worker's cancellation observe failed with "source
+        # changed" because a concurrent writer moved the source while the
+        # readonly identity precheck opened. Identity reads retry contention.
+        from puppetmaster import readonly
+        real_connect = readonly.connect
+        for store, job, task, run, ref in self.stores():
+            binding = task_binding(task)
+            attempt = ExecutionAttempt.from_run(run, adapter="local")
+            store.record_attempt(attempt)
+            intent = EffectReceipt(ref, "effect_rw", immutable_digest({"command": "rw"}),
+                                   binding, run.id, attempt.attempt_id, 1,
+                                   "not_dispatched", "reconcile_first")
+            store.record_effect(intent)
+            moves = []
+
+            def moved_once(*args, **kwargs):
+                if len(moves) < 3:
+                    moves.append(1)
+                    raise readonly.ReadUnavailable("unable to open database: source changed")
+                return real_connect(*args, **kwargs)
+            with patch("puppetmaster.readonly.connect", side_effect=moved_once):
+                self.assertEqual(store.advance_effect(ref, intent.effect_id, expected_revision=1,
+                                                      outcome="in_flight", evidence_refs=("d",)).revision, 2)
+                moves.clear()
+                self.assertEqual(store.request_cancellation(ref, "cancel_rw", [binding]).outcome, "requested")
+                moves.clear()
+                store.observe_cancellation(ref, binding)
+            self.assertEqual(store.get_cancellation_receipt(ref, "cancel_rw").outcome, "observed_stop")
+
     def test_effect_immutable_replay_cas_and_unknown_fence(self):
         for store, job, task, run, ref in self.stores():
             attempt = ExecutionAttempt.from_run(run, adapter="local")

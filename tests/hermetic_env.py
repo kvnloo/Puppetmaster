@@ -215,6 +215,7 @@ def apply_hermetic_isolation(*, register_atexit: bool = True) -> None:
     _ENV_BEFORE["PUPPETMASTER_RATE_LIMIT_PATH"] = os.environ.get(
         "PUPPETMASTER_RATE_LIMIT_PATH"
     )
+    _ENV_BEFORE["PUPPETMASTER_APP_STATE_ROOT"] = os.environ.get("PUPPETMASTER_APP_STATE_ROOT")
     _ENV_BEFORE[ONLY_ENV] = os.environ.get(ONLY_ENV)
     for key in _PIN_KEYS_TO_CLEAR:
         _ENV_BEFORE[key] = os.environ.get(key)
@@ -224,6 +225,9 @@ def apply_hermetic_isolation(*, register_atexit: bool = True) -> None:
     os.environ["PUPPETMASTER_MODELS_PATH"] = str(sentinel)
     os.environ["PUPPETMASTER_PROVIDER_HEALTH_PATH"] = str(health_db)
     os.environ["PUPPETMASTER_RATE_LIMIT_PATH"] = str(rate_limit_db)
+    # Store discovery and file claims live under the app state root; never
+    # let the suite read or write the developer's real Puppetmaster state.
+    os.environ["PUPPETMASTER_APP_STATE_ROOT"] = str(Path(_ISOLATION_TMP) / "app-state")
     os.environ[ONLY_ENV] = ",".join(KNOWN_ADAPTERS)
     for key in _PIN_KEYS_TO_CLEAR:
         os.environ.pop(key, None)

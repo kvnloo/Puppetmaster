@@ -2793,30 +2793,12 @@ class SwarmStore(StoreContracts):
     def _read_incarnation(self, attach_deadline=None):
         from puppetmaster.identity import read_identity
         from puppetmaster.projections import connection
-        import sqlite3
-        from puppetmaster.readonly import ReadUnavailable
-        deadline = time.monotonic() + 5 if attach_deadline is None else attach_deadline
-        while True:
-            try:
-                with connection(self, metadata_only=True, attach_deadline=attach_deadline) as c:
-                    return read_identity(c, self.backend_name)
-            except (sqlite3.OperationalError, ReadUnavailable, OSError) as exc:
-                from puppetmaster.readonly import _source_open_contention
-                transient = (
-                    isinstance(exc, sqlite3.OperationalError)
-                    and str(exc) == 'database is locked'
-                ) or (
-                    isinstance(exc, ReadUnavailable)
-                    and any(reason in str(exc)
-                            for reason in ('source changed', 'active reader', 'live sidecars'))
-                ) or (
-                    isinstance(exc, OSError)
-                    and not isinstance(exc, FileNotFoundError)
-                    and _source_open_contention(exc)
-                )
-                if not transient or time.monotonic() >= deadline:
-                    raise
-                time.sleep(.01)
+        from puppetmaster.readonly import retry_transient
+
+        def read():
+            with connection(self, metadata_only=True, attach_deadline=attach_deadline) as c:
+                return read_identity(c, self.backend_name)
+        return retry_transient(read, time.monotonic() + 5 if attach_deadline is None else attach_deadline)
 
     def _claim_job_ref(self, job_id):
         """Bind a local claim through its store session, including live WAL."""
@@ -2869,8 +2851,12 @@ class SwarmStore(StoreContracts):
         from puppetmaster.identity import validate
         from puppetmaster.projections import connection as open_connection
         if connection is None:
-            with open_connection(self, metadata_only=True) as c:
-                return self.validate_job_ref(job_ref, connection=c, strict=strict)
+            from puppetmaster.readonly import retry_transient
+
+            def read():
+                with open_connection(self, metadata_only=True) as c:
+                    return self.validate_job_ref(job_ref, connection=c, strict=strict)
+            return retry_transient(read, time.monotonic() + 5)
         validate(self, job_ref, connection, strict=strict)
         table = "jobs" if self.backend_name == "sqlite" else "projection_current"
         where = "id=?" if self.backend_name == "sqlite" else "kind='job' AND id=?"
@@ -3927,19 +3913,26 @@ class SwarmStore(StoreContracts):
         self.init()
         path = self.locks_dir / f"{self._safe_key(name)}.lock"
         payload = json.dumps({"owner": owner, "at": time.time()}, sort_keys=True)
-        try:
-            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-            return True
-        except FileExistsError:
-            if ttl_seconds is not None and self._lock_is_stale(path, ttl_seconds):
+        while True:
+            try:
+                descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                    handle.write(payload)
+                return True
+            except FileExistsError:
+                if ttl_seconds is None:
+                    return False
+                stale = self._lock_is_stale(path, ttl_seconds)
+                if stale is None:
+                    continue  # released since our create failed: compete again
+                if not stale:
+                    return False
                 try:
                     path.unlink()
                 except FileNotFoundError:
                     pass
-                return self.acquire_lock(name, owner, ttl_seconds=ttl_seconds)
-            return False
+                except PermissionError:
+                    return False  # Windows: an owner holds it open, so it is live
 
     def release_lock(self, name: str, owner: Optional[str] = None) -> None:
         path = self.locks_dir / f"{self._safe_key(name)}.lock"
@@ -3995,7 +3988,7 @@ class SwarmStore(StoreContracts):
         return raw
 
     @staticmethod
-    def _empty_lock_is_stale(path: Path, ttl_seconds: int) -> bool:
+    def _empty_lock_is_stale(path: Path, ttl_seconds: int) -> Optional[bool]:
         """Age-gate a contentless lock file by its own mtime.
 
         ``acquire_lock`` creates the lock with ``O_EXCL`` and writes the owner
@@ -4007,17 +4000,22 @@ class SwarmStore(StoreContracts):
         try:
             mtime = path.stat().st_mtime
         except FileNotFoundError:
-            return True
+            return None
         except OSError:
-            return True
+            return False
         return (time.time() - mtime) >= ttl_seconds
 
     @staticmethod
-    def _lock_is_stale(path: Path, ttl_seconds: int) -> bool:
+    def _lock_is_stale(path: Path, ttl_seconds: int) -> Optional[bool]:
+        """True only for a lock proven older than the TTL; None if it is gone.
+
+        A vanished lock was released, not orphaned: unlinking the path then
+        would delete whichever owner re-acquired it in between.
+        """
         try:
             raw = path.read_text(encoding="utf-8").strip()
         except FileNotFoundError:
-            return True
+            return None
         except OSError:
             return SwarmStore._empty_lock_is_stale(path, ttl_seconds)
         if not raw:
