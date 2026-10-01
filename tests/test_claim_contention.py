@@ -322,5 +322,31 @@ class ClaimContentionTests(unittest.TestCase):
                 self.assertEqual(len(events), 4)
 
 
+class FileLockReclaimTests(unittest.TestCase):
+    def test_released_then_reacquired_lock_is_not_broken(self):
+        # A lock that vanished between our O_EXCL failure and our staleness read
+        # was released, not stale. Unlinking whatever is at the path then
+        # deleted the next owner's live lock (POSIX double-hold) or hit its
+        # open handle (Windows WinError 32 crashed the worker).
+        with TemporaryDirectory() as tmp:
+            store = SwarmStore(Path(tmp))
+            name = 'completion:job'
+            self.assertTrue(store.acquire_lock(name, 'first', ttl_seconds=300))
+            path = store.locks_dir / ('%s.lock' % store._safe_key(name))
+            read_text = Path.read_text
+
+            def handoff(self_path, *args, **kwargs):
+                if self_path == path and not handoff.done:
+                    handoff.done = True
+                    store.release_lock(name, owner='first')
+                    assert store.acquire_lock(name, 'second', ttl_seconds=300)
+                    raise FileNotFoundError(str(path))
+                return read_text(self_path, *args, **kwargs)
+            handoff.done = False
+            with patch.object(Path, 'read_text', handoff):
+                self.assertFalse(store.acquire_lock(name, 'third', ttl_seconds=300))
+            self.assertEqual(store._lock_owner(path), 'second')
+
+
 if __name__ == '__main__':
     unittest.main()

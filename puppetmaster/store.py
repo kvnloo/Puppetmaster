@@ -3913,19 +3913,26 @@ class SwarmStore(StoreContracts):
         self.init()
         path = self.locks_dir / f"{self._safe_key(name)}.lock"
         payload = json.dumps({"owner": owner, "at": time.time()}, sort_keys=True)
-        try:
-            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(payload)
-            return True
-        except FileExistsError:
-            if ttl_seconds is not None and self._lock_is_stale(path, ttl_seconds):
+        while True:
+            try:
+                descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                    handle.write(payload)
+                return True
+            except FileExistsError:
+                if ttl_seconds is None:
+                    return False
+                stale = self._lock_is_stale(path, ttl_seconds)
+                if stale is None:
+                    continue  # released since our create failed: compete again
+                if not stale:
+                    return False
                 try:
                     path.unlink()
                 except FileNotFoundError:
                     pass
-                return self.acquire_lock(name, owner, ttl_seconds=ttl_seconds)
-            return False
+                except PermissionError:
+                    return False  # Windows: an owner holds it open, so it is live
 
     def release_lock(self, name: str, owner: Optional[str] = None) -> None:
         path = self.locks_dir / f"{self._safe_key(name)}.lock"
@@ -3981,7 +3988,7 @@ class SwarmStore(StoreContracts):
         return raw
 
     @staticmethod
-    def _empty_lock_is_stale(path: Path, ttl_seconds: int) -> bool:
+    def _empty_lock_is_stale(path: Path, ttl_seconds: int) -> Optional[bool]:
         """Age-gate a contentless lock file by its own mtime.
 
         ``acquire_lock`` creates the lock with ``O_EXCL`` and writes the owner
@@ -3993,17 +4000,22 @@ class SwarmStore(StoreContracts):
         try:
             mtime = path.stat().st_mtime
         except FileNotFoundError:
-            return True
+            return None
         except OSError:
-            return True
+            return False
         return (time.time() - mtime) >= ttl_seconds
 
     @staticmethod
-    def _lock_is_stale(path: Path, ttl_seconds: int) -> bool:
+    def _lock_is_stale(path: Path, ttl_seconds: int) -> Optional[bool]:
+        """True only for a lock proven older than the TTL; None if it is gone.
+
+        A vanished lock was released, not orphaned: unlinking the path then
+        would delete whichever owner re-acquired it in between.
+        """
         try:
             raw = path.read_text(encoding="utf-8").strip()
         except FileNotFoundError:
-            return True
+            return None
         except OSError:
             return SwarmStore._empty_lock_is_stale(path, ttl_seconds)
         if not raw:
