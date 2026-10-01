@@ -1,3 +1,23 @@
+## v1.27.36 — 2026-10-01
+
+**A file lock can no longer be held twice, and contract writes survive concurrent writers.**
+
+- File-store locks (completion, claims and the like) treated a lock that was
+  released between a failed create and the staleness check as stale, so the
+  reclaimer unlinked whatever was at the path: the next owner's live lock.
+  On POSIX two workers then held the same lock; on Windows the unlink hit
+  the owner's open handle and crashed the worker (WinError 32). A vanished
+  lock is now competed for again, and only a lock proven older than its TTL
+  is broken.
+- `validate_job_ref` opened its own readonly connection with no retry, so a
+  concurrent writer moving the source failed cancellation observe,
+  cancellation requests and effect updates with `source changed`. Identity
+  reads now share one bounded retry with worker attach.
+- `PUPPETMASTER_APP_STATE_ROOT` overrides the app state root (projects,
+  file claims). The test suite sets it, so it no longer reads or writes the
+  developer's real Puppetmaster state; on macOS it previously scanned every
+  real project store.
+
 ## v1.27.35 — 2026-09-30
 
 **Workers no longer fail startup or teardown because Windows was slow.**
