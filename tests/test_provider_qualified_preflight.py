@@ -199,6 +199,43 @@ class ProviderQualifiedPreflightTests(TestCase):
         self.assertNotIn("preflight:cached_model_not_in_catalog", result.evidence)
         self.assertIn("openai", result.reason)
 
+    def test_registry_provider_binding_outranks_id_namespace(self) -> None:
+        # Marionette binds OpenRouter models as ``agentic/<namespace>/<leaf>``
+        # with ``payload_defaults.provider``. A namespace that is also a direct
+        # provider (deepseek, openai) must not reroute the readiness check:
+        # a router fallback to this spec was blocked as "provider 'deepseek'
+        # is not available" with only OpenRouter keyed.
+        spec = ModelSpec(
+            id="agentic/deepseek/deepseek-v4-pro",
+            adapter="agentic",
+            adapter_model_name="deepseek/deepseek-v4-pro",
+            capability_score=85,
+            billing="api",
+            tags=["agentic"],
+            payload_defaults={"provider": "openrouter"},
+        )
+        for ready, ok in (({"openrouter"}, True), ({"deepseek"}, False)):
+            with TemporaryDirectory() as tmp:
+                registry_path = Path(tmp) / "models.json"
+                save_registry([spec], registry_path)
+                write_discovery_meta("agentic", 1, registry_path, model_ids=["other-model"])
+                with patch.dict(
+                    os.environ,
+                    {
+                        "PUPPETMASTER_MODELS_PATH": str(registry_path),
+                        "PUPPETMASTER_CATALOG_CACHE_TTL_SECONDS": "3600",
+                    },
+                    clear=False,
+                ), patch("puppetmaster.providers.available_providers", return_value=ready):
+                    result = preflight_check(
+                        "agentic",
+                        "deepseek/deepseek-v4-pro",
+                        identities=("agentic/deepseek/deepseek-v4-pro",),
+                        billing_status=_healthy_agentic(),
+                    )
+            self.assertEqual(result.ok, ok, (ready, result.reason))
+            self.assertIn("openrouter", result.reason)
+
     def test_worker_preflight_forwards_router_model_id(self) -> None:
         from puppetmaster.workers import LocalWorker
 

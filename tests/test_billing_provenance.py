@@ -249,6 +249,25 @@ class BillingProvenanceTests(unittest.TestCase):
         self.assertEqual(stamp_model_billing({'model': 'gpt-6-astra'})['billing'], 'unknown')
         self.assertEqual(stamp_model_billing({'billing': 'invalid'}, plan)['billing'], 'plan')
 
+    def test_reroute_takes_the_new_models_provider_binding(self):
+        # A rate-limited opencode-go route fell back to an OpenRouter model, but
+        # the first route's injected provider stayed in the payload, so the
+        # fallback went back to the exhausted opencode-go account.
+        go = ModelSpec(id='agentic/deepseek-v4-pro', adapter='agentic', adapter_model_name='deepseek-v4-pro',
+                       billing='plan', payload_defaults={'provider': 'opencode-go'})
+        router = ModelSpec(id='agentic/z-ai/glm-5.3', adapter='agentic', adapter_model_name='z-ai/glm-5.3',
+                           billing='api', payload_defaults={'provider': 'openrouter'})
+        def route(payload, spec):
+            return merge_routing_payload(payload, SimpleNamespace(model=spec, policy='balanced',
+                capability_needed=85, estimated_cost_usd=0, allowed_model_ids=None),
+                registry=[go, router], previous_adapter='agentic')
+        first = route({'auto_route': True}, go)
+        self.assertEqual(first['provider'], 'opencode-go')
+        fallback = route(first, router)
+        self.assertEqual((fallback['provider'], fallback['model']), ('openrouter', 'z-ai/glm-5.3'))
+        # A provider the caller chose (not injected by the previous route) still wins.
+        self.assertEqual(route(dict(first, provider='custom'), router)['provider'], 'custom')
+
     def test_billing_identity_aliases_and_ambiguous_models(self):
         plan = ModelSpec(id='claude-code/sonnet-4-5', adapter='claude-code',
                          adapter_model_name='sonnet-4.5', billing='plan')
