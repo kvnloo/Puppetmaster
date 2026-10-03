@@ -1,3 +1,18 @@
+## v1.27.39 — 2026-10-02
+
+**Read-only Claude Code workers keep their report.**
+
+- Read-only claude-code workers ran Claude Code's plan mode, which writes the
+  worker's report to `~/.claude/plans` and may answer stdout with only a
+  pointer. Reports were lost and the user's plans folder filled with
+  `reporting-contract-...md` files. Read-only intent is still
+  `permission_mode=plan` inside Puppetmaster; the CLI now runs `dontAsk`
+  with a Read/Grep/Glob allowlist and Edit, Write and NotebookEdit denied.
+  A probe on a three-line file also cost about a third of plan mode.
+- `swarm_mode` honours adapter read-only settings (claude-code
+  `permission_mode=plan`, codex `sandbox=read-only`), so those runs no
+  longer print `mode=edit — workers may modify files`.
+
 ## v1.27.38 — 2026-10-02
 
 **The cursor adapter survives a Puppetmaster upgrade.**
