@@ -12,6 +12,16 @@ class StoreIdentityError(ValueError):
     """Missing, corrupt, legacy or replaced identity; never implicitly rebind."""
 
 
+class StoreMetadataDrift(StoreIdentityError):
+    """Store metadata moved (ctime only) while a binding was in flight.
+
+    Same device and inode, same size and mtime: nothing replaced or rewrote the
+    store. macOS sets ``com.apple.provenance`` on a file the first time a new
+    app lineage writes it, and chmod to the current mode does the same. A
+    binding must not complete across the drift, but it may restart.
+    """
+
+
 _launch_prepare_lock = threading.Lock()
 _prepared_launch_roots: set[str] = set()
 

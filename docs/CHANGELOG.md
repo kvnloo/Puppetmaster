@@ -1,3 +1,25 @@
+## v1.27.40 — 2026-10-03
+
+**A worker that dies attaching to the store is respawned, and its siblings finish their work.**
+
+- A 2-worker claude-code swarm on macOS failed one second after launch: one
+  worker's attach hit the metadata fence (ctime moved, size and mtime did
+  not; macOS sets `com.apple.provenance` the first time a new app lineage
+  writes a file). The supervisor raised on that first non-zero exit,
+  terminated the other worker mid-task (its task stayed `running` on a dead
+  lease) and marked the job failed with no findings and no retry.
+- The fence is unchanged (stat cannot tell this drift from the file being
+  renamed away and back mid-binding) but raises `StoreMetadataDrift`, a
+  `StoreIdentityError` subclass. A worker whose attach fails transiently
+  (metadata drift, lock or busy contention, timeouts) exits 75; a replaced
+  store or missing schema still exits 1.
+- The supervisor waits for every worker before raising, and respawns a role
+  whose worker exited 75, at most twice with backoff.
+- The investigation playbook runs one explore worker per goal instead of
+  explore and review on the same goal (the same investigation twice). Pass
+  structured roles for disjoint slices. Interrogate keeps its review+audit
+  pair.
+
 ## v1.27.39 — 2026-10-02
 
 **Read-only Claude Code workers keep their report.**

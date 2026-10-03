@@ -728,10 +728,10 @@ def _source_open_contention(exc):
 
 
 def _metadata_fence(before, after):
-    from puppetmaster.identity import StoreIdentityError
+    from puppetmaster.identity import StoreMetadataDrift
     if (before is not None and after is not None and
             before[2:4] == after[2:4] and before[4] != after[4]):
-        raise StoreIdentityError('store source metadata changed during binding')
+        raise StoreMetadataDrift('store source metadata changed during binding')
 
 
 def _transient_read(exc):

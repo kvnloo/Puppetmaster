@@ -43,11 +43,15 @@ RECIPES = {
     "investigation": PlaybookRecipe(
         playbook_id="investigation",
         suggested_verb="puppetmaster_start_swarm",
-        roles=("explore", "review"),
+        # One role: a single goal stamped onto explore AND review is the same
+        # investigation twice (double cost, two workers on one store). Callers
+        # who want disjoint slices pass structured roles.
+        roles=("explore",),
         payload={"playbook": "investigation"},
         directive=(
-            "Playbook investigation: disjoint explore/review swarm; recall "
-            "artifacts at zero token cost; do not expect a PATCH."
+            "Playbook investigation: one read-only explore worker per goal "
+            "(pass structured roles for disjoint slices); recall artifacts at "
+            "zero token cost; do not expect a PATCH."
         ),
     ),
     "bug-fix": PlaybookRecipe(
