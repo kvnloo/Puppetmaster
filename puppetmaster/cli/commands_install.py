@@ -530,7 +530,7 @@ def _run_install_cursor(args) -> int:
     else:
         target = (Path.cwd() / ".cursor" / "mcp.json").resolve()
     if not getattr(args, "dry_run", False):
-        sdk = ensure_cursor_sdk(Path.cwd())
+        sdk = ensure_cursor_sdk()
         print(f"[install-cursor-mcp] sdk {sdk.status}: {sdk.detail}")
     result = install_cursor_mcp(
         target_path=target,
@@ -995,7 +995,7 @@ def _run_setup(args) -> int:
             "installing its MCP client (.cursor/mcp.json)"
         )
     else:
-        sdk = cli.ensure_cursor_sdk(cwd)
+        sdk = cli.ensure_cursor_sdk()
         print(f"  sdk {sdk.status}  {sdk.detail}")
         cursor_result = cli.install_cursor_mcp(
             target_path=(cwd / ".cursor" / "mcp.json").resolve(),

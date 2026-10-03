@@ -1,3 +1,22 @@
+## v1.27.38 — 2026-10-02
+
+**The cursor adapter survives a Puppetmaster upgrade.**
+
+- `ensure_cursor_sdk` installed `@cursor/sdk` beside the installed package.
+  `uv tool upgrade` and `pipx upgrade` rebuild that environment, so every
+  upgrade deleted the SDK and cursor workers died in about a second with
+  `sdk_not_installed` (Node `ERR_MODULE_NOT_FOUND`). The SDK now installs
+  into a version-independent home under the app state root
+  (`cursor-sdk/`). Node ignores `NODE_PATH` for ES modules, so when only
+  that home has the SDK the adapter, catalog discovery and preflight run a
+  byte-identical copy of the runner beside it.
+- A `node_modules` in the caller's working directory no longer makes the
+  bootstrap report the SDK as installed; the runner never resolves from cwd.
+- `scripts/wait_for_pypi.py` waits for the pip index to serve a release
+  before dependent pins are bumped.
+- The Windows SQLite concurrency stress test runs 16 workers (32 on other
+  platforms); see the parked readonly/WAL redesign notes.
+
 ## v1.27.37 — 2026-10-01
 
 **Windows process calls go through one typed kernel32 binding.**

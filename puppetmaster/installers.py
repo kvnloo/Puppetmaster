@@ -127,16 +127,17 @@ class SdkBootstrapResult:
 def _default_package_root() -> Path:
     """Where ``npm install --prefix`` points when the caller didn't say.
 
-    ``puppetmaster/..`` — site-packages for a pip/pipx install, which is the
-    directory Node's resolution walks up to from ``cursor_sdk_runner.mjs``.
-    Split out so tests can point the default somewhere safe without patching
-    ``__file__``.
+    The version-independent SDK home, not site-packages: ``uv tool upgrade``
+    and ``pipx upgrade`` rebuild the environment and would delete an SDK
+    installed beside the package. Split out so tests can point the default
+    somewhere safe.
     """
-    return Path(__file__).resolve().parent.parent
+    from puppetmaster.cursor_sdk_home import sdk_home
+
+    return sdk_home()
 
 
 def ensure_cursor_sdk(
-    root: Optional[Path] = None,
     *,
     package_root: Optional[Path] = None,
     npm_executable: Optional[str] = None,
@@ -154,8 +155,9 @@ def ensure_cursor_sdk(
     """
     from puppetmaster.diagnostics import _find_cursor_sdk_install
 
-    probe_root = root if root is not None else Path.cwd()
-    existing = _find_cursor_sdk_install(probe_root)
+    # The workspace's own node_modules does not count: the runner resolves the
+    # SDK from its own location, never from the caller's cwd.
+    existing = _find_cursor_sdk_install(None)
     if existing is not None:
         return SdkBootstrapResult(
             "unchanged", f"@cursor/sdk already installed ({existing})", str(existing)
@@ -209,7 +211,7 @@ def ensure_cursor_sdk(
             "error",
             f"npm install @cursor/sdk failed (exit {completed.returncode}): {tail}",
         )
-    location = _find_cursor_sdk_install(probe_root)
+    location = _find_cursor_sdk_install(None)
     if location is None:
         return SdkBootstrapResult(
             "error",

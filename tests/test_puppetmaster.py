@@ -8478,7 +8478,7 @@ print(json.dumps({"result": "ok", "usage": {"input_tokens": 321, "output_tokens"
             fake_diagnostics_file = fake_package_root / "puppetmaster" / "diagnostics.py"
             fake_diagnostics_file.parent.mkdir()
             fake_diagnostics_file.write_text("# stub", encoding="utf-8")
-            with patch.object(diagnostics, "__file__", str(fake_diagnostics_file)):
+            with patch("puppetmaster.cursor_sdk_home.PACKAGED_RUNNER", fake_diagnostics_file.with_name("cursor_sdk_runner.mjs")):
                 self.assertTrue(diagnostics._cursor_sdk_installed(unrelated_repo))
                 location = diagnostics._find_cursor_sdk_install(unrelated_repo)
             self.assertIsNotNone(location)
@@ -8504,7 +8504,7 @@ print(json.dumps({"result": "ok", "usage": {"input_tokens": 321, "output_tokens"
             sdk.mkdir(parents=True)
             fake_diagnostics_file = package_dir / "diagnostics.py"
             fake_diagnostics_file.write_text("# stub", encoding="utf-8")
-            with patch.object(diagnostics, "__file__", str(fake_diagnostics_file)):
+            with patch("puppetmaster.cursor_sdk_home.PACKAGED_RUNNER", fake_diagnostics_file.with_name("cursor_sdk_runner.mjs")):
                 self.assertTrue(diagnostics._cursor_sdk_installed(unrelated_repo))
                 location = diagnostics._find_cursor_sdk_install(unrelated_repo)
             self.assertIsNotNone(location)
@@ -8520,7 +8520,7 @@ print(json.dumps({"result": "ok", "usage": {"input_tokens": 321, "output_tokens"
             fake_pkg_root = Path(tmp) / "nowhere"  # no SDK here
             fake_diagnostics_file = fake_pkg_root / "puppetmaster" / "diagnostics.py"
             fake_diagnostics_file.parent.mkdir(parents=True)
-            with patch.object(diagnostics, "__file__", str(fake_diagnostics_file)):
+            with patch("puppetmaster.cursor_sdk_home.PACKAGED_RUNNER", fake_diagnostics_file.with_name("cursor_sdk_runner.mjs")):
                 self.assertTrue(diagnostics._cursor_sdk_installed(workspace))
 
     def test_cursor_sdk_detection_returns_false_when_neither_exists(self) -> None:
@@ -8534,7 +8534,7 @@ print(json.dumps({"result": "ok", "usage": {"input_tokens": 321, "output_tokens"
             fake_diagnostics_file.parent.mkdir(parents=True)
             old_home = os.environ.pop("PUPPETMASTER_HOME", None)
             try:
-                with patch.object(diagnostics, "__file__", str(fake_diagnostics_file)):
+                with patch("puppetmaster.cursor_sdk_home.PACKAGED_RUNNER", fake_diagnostics_file.with_name("cursor_sdk_runner.mjs")):
                     self.assertFalse(diagnostics._cursor_sdk_installed(workspace))
             finally:
                 if old_home is not None:
@@ -21503,7 +21503,7 @@ class EnsureCursorSdkTests(unittest.TestCase):
             "puppetmaster.diagnostics._find_cursor_sdk_install",
             return_value=Path("/fake/site-packages/node_modules/@cursor/sdk"),
         ):
-            result = ensure_cursor_sdk(Path("/tmp"))
+            result = ensure_cursor_sdk()
         self.assertEqual(result.status, "unchanged")
         self.assertIn("@cursor/sdk", result.detail)
 
@@ -21512,7 +21512,7 @@ class EnsureCursorSdkTests(unittest.TestCase):
 
         with patch("puppetmaster.diagnostics._find_cursor_sdk_install", return_value=None), \
                 patch("puppetmaster.installers.shutil.which", return_value=None):
-            result = ensure_cursor_sdk(Path("/tmp"))
+            result = ensure_cursor_sdk()
         self.assertEqual(result.status, "skipped")
         self.assertIn("npm not on PATH", result.detail)
 
@@ -21548,7 +21548,7 @@ class EnsureCursorSdkTests(unittest.TestCase):
                 side_effect=[None, prefix / "node_modules" / "@cursor" / "sdk"],
             ), patch("puppetmaster.installers.subprocess.run", side_effect=fake_run):
                 result = ensure_cursor_sdk(
-                    Path(tmp), package_root=prefix, npm_executable="/usr/local/bin/npm"
+                    package_root=prefix, npm_executable="/usr/local/bin/npm"
                 )
 
             self.assertEqual(result.status, "installed")
@@ -21584,7 +21584,6 @@ class EnsureCursorSdkTests(unittest.TestCase):
             side_effect=[None, sdk_path],
         ), patch("puppetmaster.installers.subprocess.run", side_effect=fake_run):
             result = ensure_cursor_sdk(
-                Path("/tmp"),
                 package_root=Path("/fake/site-packages"),
                 npm_executable="/usr/local/bin/npm",
             )
@@ -21614,7 +21613,6 @@ class EnsureCursorSdkTests(unittest.TestCase):
                 patch("puppetmaster.diagnostics._find_cursor_sdk_install", return_value=None), \
                 patch("puppetmaster.installers.subprocess.run", side_effect=fake_run):
             result = ensure_cursor_sdk(
-                Path("/tmp"),
                 package_root=Path(tmp),
                 npm_executable="/usr/local/bin/npm",
             )

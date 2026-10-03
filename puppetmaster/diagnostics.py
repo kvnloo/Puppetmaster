@@ -844,20 +844,18 @@ def _cursor_sdk_installed(root: Path) -> bool:
     return _find_cursor_sdk_install(root) is not None
 
 
-def _find_cursor_sdk_install(root: Path) -> Optional[Path]:
+def _find_cursor_sdk_install(root: Optional[Path]) -> Optional[Path]:
     """Return the on-disk location of @cursor/sdk, or None if not found."""
+    from puppetmaster.cursor_sdk_home import home_sdk, packaged_sdk
+
     candidates: list[Path] = []
     if root is not None:
         candidates.append(Path(root) / "node_modules" / "@cursor" / "sdk")
-    # cursor_sdk_runner.mjs resolves @cursor/sdk with Node's resolution,
-    # which walks node_modules upward from the runner's own directory.
-    # Mirror the full walk so diagnostics agree with runtime: a probe
-    # pinned to one fixed level (the old `parent.parent`) missed valid
-    # installs at e.g. site-packages/puppetmaster/node_modules — Node's
-    # *first* hop — and reported "SDK not found" on working machines.
-    package_dir = Path(__file__).resolve().parent
-    for ancestor in [package_dir, *package_dir.parents]:
-        candidates.append(ancestor / "node_modules" / "@cursor" / "sdk")
+    # What the adapter can actually run against: Node's upward walk from the
+    # packaged runner, then the version-independent SDK home.
+    for found in (packaged_sdk(), home_sdk()):
+        if found is not None:
+            candidates.append(found)
     # An editable install ($PUPPETMASTER_HOME / install dir) may live
     # somewhere else entirely; honor an explicit override so users on
     # weird layouts can self-correct without code changes.

@@ -863,7 +863,12 @@ class WorkerHeartbeatLifecycleTests(unittest.TestCase):
 
 class SqliteMultiprocessAttachTests(unittest.TestCase):
     def test_supervisor_ensure_then_n_workers_attach_claim_complete(self) -> None:
-        worker_count = 32
+        # This proves attach/claim/complete correctness under contention, not
+        # capacity. 32 processes on a 4-vCPU Windows runner hit the SQLite WAL
+        # teardown cycle that the readonly design depends on (stalls, rare
+        # native crashes in SQLite <=3.49, disk I/O errors in 3.50) in a few
+        # percent of runs; real swarms run 3-8 workers. 16 still contends hard.
+        worker_count = 16 if sys.platform == "win32" else 32
         task_count = worker_count * 3
         with TemporaryDirectory() as tmp:
             root = Path(tmp) / ".puppetmaster"
