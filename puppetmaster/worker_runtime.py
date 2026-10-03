@@ -780,6 +780,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# EX_TEMPFAIL: the worker could not attach to the store, so it claimed nothing
+# and the supervisor can respawn the role without duplicating work.
+WORKER_ATTACH_FAILED_EXIT = 75
+
+
+def _transient_attach_failure(exc: BaseException) -> bool:
+    """Attach failures a fresh process can expect to get past.
+
+    Metadata-only drift (macOS provenance xattr, same-mode chmod), lock or
+    busy contention and helper timeouts are transient. A replaced store or a
+    missing schema is not: respawning would only bind the wrong store or fail
+    again.
+    """
+    import sqlite3
+
+    from puppetmaster.identity import StoreMetadataDrift
+
+    if isinstance(exc, StoreMetadataDrift):
+        return True
+    return isinstance(exc, (sqlite3.OperationalError, TimeoutError, BlockingIOError, PermissionError))
+
+
 def _write_startup_error(
     backend: str,
     state_dir,
@@ -832,8 +854,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     os.environ["PUPPETMASTER_STATE_DIR"] = str(state_dir)
     worker_id = args.worker_id or worker_id_for(args.role)
     try:
+        store = create_worker_store(args.backend, state_dir)
+    except Exception as exc:  # noqa: BLE001 — classified below
+        _write_startup_error(args.backend, state_dir, args.job_id, worker_id, exc)
+        if _transient_attach_failure(exc):
+            # Nothing claimed yet: the supervisor respawns the role.
+            return WORKER_ATTACH_FAILED_EXIT
+        raise
+    try:
         runtime = WorkerRuntime(
-            store=create_worker_store(args.backend, state_dir),
+            store=store,
             job_id=args.job_id,
             role=args.role,
             worker_id=worker_id,

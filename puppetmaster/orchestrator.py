@@ -44,6 +44,8 @@ from puppetmaster.workers import (
 # broken environment (every adapter unfunded) can't loop forever.
 _MAX_FALLBACK_ATTEMPTS = 2
 _MAX_FALLBACK_ROUNDS = 3
+# Respawns for a worker that died attaching to the store (it claimed nothing).
+_ATTACH_RESPAWN_LIMIT = 2
 
 # How many times a single COMPLETE-but-low-confidence task will be re-dispatched
 # one capability tier up before its result is accepted as-is. Bounded so a
@@ -2617,10 +2619,7 @@ class Orchestrator:
             for role in roles
         ]
         try:
-            for role, process in processes:
-                self._wait_for_worker(process, job, tasks)
-                if process.returncode != 0:
-                    raise self._worker_exit_error(job.id, role, process)
+            self._await_workers(job, tasks, processes, lease_seconds=lease_seconds)
 
             if self.store.has_incomplete_tasks(job.id):
                 recovered = self.store.recover_stale_tasks(job.id)
@@ -2809,12 +2808,11 @@ class Orchestrator:
             for role in roles
         ]
         try:
-            for role, process in processes:
-                process.wait(timeout=self._worker_wait_timeout(dependencies))
-                if process.returncode != 0:
-                    raise self._worker_exit_error(
-                        job.id, role, process, phase="prerequisite worker"
-                    )
+            self._await_workers(
+                job, dependencies, processes, lease_seconds=lease_seconds,
+                phase="prerequisite worker",
+                wait=lambda process: process.wait(timeout=self._worker_wait_timeout(dependencies)),
+            )
         finally:
             # If a wait timed out or a prerequisite failed mid-batch, don't
             # leave the remaining workers running as orphans — terminate (then
@@ -2877,6 +2875,52 @@ class Orchestrator:
             env["TRACEPARENT"] = self._traceparent
             env["PUPPETMASTER_TRACEPARENT"] = self._traceparent
         return subprocess.Popen(command, env=env)
+
+    def _await_workers(
+        self,
+        job: Job,
+        tasks: list[Task],
+        processes: list[tuple[str, subprocess.Popen]],
+        *,
+        lease_seconds: int,
+        phase: str = "worker",
+        wait: Optional[Callable[[subprocess.Popen], object]] = None,
+    ) -> None:
+        """Wait for every worker; respawn roles whose worker never attached.
+
+        A worker that exits ``WORKER_ATTACH_FAILED_EXIT`` claimed nothing, so its
+        role is respawned (bounded). Other failures are raised only after every
+        sibling has finished: raising on the first one used to terminate
+        siblings mid-task and strand their tasks ``running`` on a dead lease.
+        ``processes`` gains the respawned workers so the caller's cleanup sees them.
+        """
+        from puppetmaster.worker_runtime import WORKER_ATTACH_FAILED_EXIT
+
+        respawns: dict[str, int] = {}
+        failure: Optional[RuntimeError] = None
+        index = 0
+        while index < len(processes):
+            role, process = processes[index]
+            index += 1
+            if wait is None:
+                self._wait_for_worker(process, job, tasks)
+            else:
+                wait(process)
+            if process.returncode == 0:
+                continue
+            attempts = respawns.get(role, 0)
+            if process.returncode == WORKER_ATTACH_FAILED_EXIT and attempts < _ATTACH_RESPAWN_LIMIT:
+                respawns[role] = attempts + 1
+                self.store.emit(job.id, "worker.attach_respawned", {
+                    "role": role, "attempt": attempts + 1, "pid": process.pid,
+                })
+                time.sleep(0.2 * (attempts + 1))
+                processes.append((role, self._spawn_worker(job.id, role, lease_seconds=lease_seconds)))
+                continue
+            if failure is None:
+                failure = self._worker_exit_error(job.id, role, process, phase=phase)
+        if failure is not None:
+            raise failure
 
     def _worker_exit_error(
         self,
