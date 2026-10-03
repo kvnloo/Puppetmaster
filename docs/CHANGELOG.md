@@ -13,6 +13,12 @@
   OpenRouter model named `agentic/deepseek/...` was blocked as "provider
   'deepseek' is not available" with only OpenRouter keyed. The registry's
   explicit `payload_defaults.provider` binding now outranks the namespace.
+- Worker verdicts had no definition. Read-only analysis workers graded
+  themselves PARTIAL because they "performed no test execution", which
+  analysis mode forbids, so every clean audit was reported degraded. The
+  review prompt and the `submit_findings` schema now define the verdict
+  against the assigned scope, and say that not executing code is not a
+  reason for PARTIAL.
 
 ## v1.27.40 — 2026-10-03
 
