@@ -128,7 +128,7 @@ class StampPayloadTests(unittest.TestCase):
 
 
 class SwarmPlaybookLaunchTests(unittest.TestCase):
-    def test_investigation_fills_explore_review_when_roles_omitted(self) -> None:
+    def test_investigation_fills_one_explore_role_when_roles_omitted(self) -> None:
         specs = build_analysis_swarm_specs(
             "are we sure how leases renew",
             [],
@@ -136,7 +136,9 @@ class SwarmPlaybookLaunchTests(unittest.TestCase):
             cwd="/tmp/x",
             playbook="investigation",
         )
-        self.assertEqual([s.role for s in specs], ["explore", "review"])
+        # A single goal must not fan out into duplicate explore/review workers.
+        self.assertEqual([s.role for s in specs], ["explore"])
+        self.assertNotIn("duplication_warning", specs[0].payload)
         for spec in specs:
             self.assertEqual(spec.payload.get("playbook"), "investigation")
             self.assertTrue(spec.payload.get("read_only"))
