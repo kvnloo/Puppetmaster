@@ -1,3 +1,22 @@
+## v1.27.42 — 2026-10-03
+
+**File-store workers survive Windows lock contention, and a flaky attach test asserts the real contract.**
+
+- A worker died with `PermissionError` creating a lock file: Windows refuses an
+  exclusive create while the previous owner's unlink of that file is pending.
+  `acquire_lock` now retries that sharing violation briefly and treats a
+  persistent one as a held lock, like the unlink path already did.
+- A file-store worker built its metadata index lazily at its first lock, after
+  attach, so `database is locked` there exited 1 and failed the job. The worker
+  now initializes the file store while attaching, so contention is a
+  respawnable attach failure (exit 75).
+- `test_attach_waits_for_confirmed_reader_then_reads_checkpoint` asserted the
+  final error carried SQLITE_BUSY, but attach binding deliberately ends in its
+  own bounded `ReadTimeout` when the window closes mid-retry (pinned by
+  `test_accepted_retry_timeout_preserves_error_only_for_ordinary`). It now
+  asserts the helper confirmed the reader as BUSY and uses a 2s budget. Windows
+  probe under CPU stress: 7/180 failures before, 0/160 after.
+
 ## v1.27.41 — 2026-10-03
 
 **A router fallback runs on the fallback model's own provider.**

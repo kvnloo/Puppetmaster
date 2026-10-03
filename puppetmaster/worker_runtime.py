@@ -855,6 +855,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     worker_id = args.worker_id or worker_id_for(args.role)
     try:
         store = create_worker_store(args.backend, state_dir)
+        if store.backend_name == "file":
+            # A file store builds its metadata index on first use. Do it while
+            # attaching, so lock contention here is a respawnable attach
+            # failure instead of a crash after the worker has started.
+            store.init()
     except Exception as exc:  # noqa: BLE001 — classified below
         _write_startup_error(args.backend, state_dir, args.job_id, worker_id, exc)
         if _transient_attach_failure(exc):

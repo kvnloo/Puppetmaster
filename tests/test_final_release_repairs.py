@@ -87,12 +87,28 @@ class FinalReleaseRepairs(unittest.TestCase):
                 holder.execute('BEGIN')
                 holder.execute('SELECT * FROM metadata').fetchall()
                 with damaged_sidecars(holder, supervisor.db_path):
-                    with self.assertRaises(readonly.ReadUnavailable) as caught:
-                        readonly.connect(supervisor, timeout=.5, attach_binding=True)
-                    # Both lock APIs confirm a live conflicting reader. The
-                    # missing sidecars still prevent a read, but the retry
-                    # classification remains SQLITE_BUSY.
-                    self.assertEqual(getattr(caught.exception, 'sqlite_errorcode', None), 5)
+                    verdicts = []
+                    real_receive = readonly.ReadConnection._receive
+
+                    def receive(conn):
+                        try:
+                            return real_receive(conn)
+                        except sqlite3.OperationalError as err:
+                            verdicts.append(getattr(err, 'sqlite_errorcode', None))
+                            raise
+                    # The helper re-asks until the attach window closes; 2s
+                    # leaves a loaded Windows runner room to start it.
+                    with self.assertRaises(readonly.ReadUnavailable) as caught, \
+                            patch.object(readonly.ReadConnection, '_receive', receive):
+                        readonly.connect(supervisor, timeout=2, attach_binding=True)
+                    # Both lock APIs confirm a live conflicting reader: the
+                    # missing sidecars still prevent a read, but the helper
+                    # classifies it SQLITE_BUSY. Attach binding may still end in
+                    # its own bounded ReadTimeout when the window closes mid-retry
+                    # (test_accepted_retry_timeout_preserves_error_only_for_ordinary).
+                    self.assertIn(5, verdicts)
+                    if not isinstance(caught.exception, readonly.ReadTimeout):
+                        self.assertEqual(getattr(caught.exception, 'sqlite_errorcode', None), 5)
             finally:
                 holder.close()
             holder = sqlite3.connect(supervisor.db_path)
