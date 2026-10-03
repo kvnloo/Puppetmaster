@@ -26,13 +26,13 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Callable, Mapping, Optional
 
+from puppetmaster.cursor_sdk_home import cursor_runner
 from puppetmaster.model_registry import (
     ModelSpec,
     catalog_content_hash,
     normalize_model_token,
 )
 
-CURSOR_RUNNER = Path(__file__).with_name("cursor_sdk_runner.mjs")
 
 # (returncode, stdout, stderr) given (command, env).
 CatalogRunner = Callable[[list[str], Mapping[str, str]], "tuple[int, str, str]"]
@@ -116,7 +116,7 @@ def fetch_cursor_catalog(
             "CURSOR_API_KEY is not set — cannot enumerate the Cursor plan catalog."
         )
     base_env["PUPPETMASTER_CURSOR_INPUT"] = json.dumps({"mode": "list-models"})
-    runner = runner_path or CURSOR_RUNNER
+    runner = runner_path or cursor_runner()
     runner_fn = run or _default_runner
     returncode, stdout, stderr = runner_fn([node_command, str(runner)], base_env)
     if returncode != 0:

@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Any, Optional, Union
 
+from puppetmaster.cursor_sdk_home import cursor_runner
 from puppetmaster.codegraph import enrich_prompt_with_codegraph, inject_worker_cli_env
 from puppetmaster.failure import classify_cursor_failure
 from puppetmaster.models import Artifact, ArtifactType, Task
@@ -44,7 +45,6 @@ from ._streaming import (
 )
 from ._base import _should_emit_patch_artifact
 
-_CURSOR_RUNNER = Path(__file__).resolve().parent.parent / "cursor_sdk_runner.mjs"
 
 class CursorAdapter(CliWorkerAdapter):
     name = "cursor"
@@ -126,7 +126,7 @@ class CursorAdapter(CliWorkerAdapter):
             cwd=cwd,
             disabled=bool(task.payload.get("disable_codegraph", False)),
         )
-        runner = _CURSOR_RUNNER
+        runner = cursor_runner()
         params = task.payload.get("params")
         return CliInvocation(
             command=[resolved, str(runner)],
@@ -311,7 +311,7 @@ class CursorAdapter(CliWorkerAdapter):
             cwd=cwd,
             disabled=bool(task.payload.get("disable_codegraph", False)),
         )
-        runner = _CURSOR_RUNNER
+        runner = cursor_runner()
         environment = inject_worker_cli_env(os.environ.copy())
         apply_worktree_ports(environment, cwd)
         cursor_input: dict[str, Any] = {"prompt": prompt, "cwd": cwd, "model": model}

@@ -445,7 +445,7 @@ def _probe_cursor(
     import json
     import subprocess
 
-    from puppetmaster.cursor_discovery import CURSOR_RUNNER
+    from puppetmaster.cursor_sdk_home import cursor_runner
 
     base_env = dict(env)
     if not base_env.get("CURSOR_API_KEY"):
@@ -458,7 +458,7 @@ def _probe_cursor(
         }
     )
     node = base_env.get("PUPPETMASTER_NODE", "node")
-    runner_path = runner or CURSOR_RUNNER
+    runner_path = runner or cursor_runner()
     popen_kwargs: dict = {}
     if os.name == "nt":
         from puppetmaster.win_console import effective_creationflags
