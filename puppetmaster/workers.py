@@ -5,6 +5,7 @@ from dataclasses import dataclass, field, replace
 from typing import AbstractSet, Callable, Mapping, Optional
 
 from puppetmaster.adapters import get_adapter, tool_list, verification_artifact
+from puppetmaster.write_intent import adapter_may_write
 from puppetmaster.models import AgentRun, Artifact, Task, TaskStatus, now_iso
 
 # Adapters that bill an LLM provider and therefore benefit from a pre-dispatch
@@ -433,7 +434,9 @@ def spec_edits_files(spec: WorkerSpec) -> bool:
         return False
     if payload.get("mode") == "implement" or payload.get("implement"):
         return True
-    return spec.adapter in _EDIT_CAPABLE_ADAPTERS
+    # Adapter-specific read-only settings (claude-code permission_mode=plan,
+    # codex sandbox=read-only) also make an edit-capable adapter emit-only.
+    return spec.adapter in _EDIT_CAPABLE_ADAPTERS and adapter_may_write(spec.adapter, payload)
 
 
 def swarm_mode(specs: list[WorkerSpec]) -> str:

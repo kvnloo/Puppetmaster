@@ -6722,8 +6722,12 @@ print(json.dumps({"result": "ok", "usage": {"input_tokens": 321, "output_tokens"
 
         guard.assert_not_called()
         command = run.call_args.kwargs["command"]
-        self.assertIn("--permission-mode", command)
-        self.assertIn("plan", command)
+        # Read-only intent stays "plan" in Puppetmaster, but the CLI must not run
+        # Claude Code's plan mode (it files the report under ~/.claude/plans).
+        mode = command[command.index("--permission-mode") + 1]
+        self.assertEqual(mode, "dontAsk")
+        self.assertEqual(command[command.index("--allowedTools") + 1], "Read,Grep,Glob")
+        self.assertEqual(command[command.index("--disallowedTools") + 1], "Edit,Write,NotebookEdit")
         verification = artifacts[0]
         self.assertEqual(verification.payload["result"], "passed")
         self.assertEqual(verification.payload["permission_mode"], "plan")
@@ -22281,8 +22285,12 @@ class PuppetmasterFrictionFixTests(unittest.TestCase):
 
         guard.assert_not_called()
         command = run.call_args.kwargs["command"]
-        self.assertIn("--permission-mode", command)
-        self.assertIn("plan", command)
+        # Read-only intent stays "plan" in Puppetmaster, but the CLI must not run
+        # Claude Code's plan mode (it files the report under ~/.claude/plans).
+        mode = command[command.index("--permission-mode") + 1]
+        self.assertEqual(mode, "dontAsk")
+        self.assertEqual(command[command.index("--allowedTools") + 1], "Read,Grep,Glob")
+        self.assertEqual(command[command.index("--disallowedTools") + 1], "Edit,Write,NotebookEdit")
         self.assertEqual(artifacts[0].payload["permission_mode"], "plan")
         self.assertIn("permission_mode:plan", artifacts[0].evidence)
 
@@ -31381,3 +31389,38 @@ class WinConsoleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClaudeReadOnlyToolPolicyTests(unittest.TestCase):
+    def test_caller_disallow_list_keeps_patterns_and_adds_edit_tools(self) -> None:
+        from puppetmaster.adapters.claude_code import read_only_disallowed_tools
+
+        self.assertEqual(
+            read_only_disallowed_tools({"disallowed_tools": "Bash(git push:*), WebFetch"}, write_capable=False),
+            ["Bash(git push:*)", "WebFetch", "Edit", "Write", "NotebookEdit"],
+        )
+        self.assertEqual(
+            read_only_disallowed_tools({"disallowed_tools": ["Write"]}, write_capable=False),
+            ["Write", "Edit", "NotebookEdit"],
+        )
+        self.assertEqual(read_only_disallowed_tools({"disallowed_tools": "X"}, write_capable=True), "X")
+
+    def test_explicit_allowlist_wins_but_read_only_default_is_read_tools(self) -> None:
+        from puppetmaster.adapters.claude_code import cli_permission_mode, implement_allowed_tools
+
+        self.assertEqual(implement_allowed_tools({}, write_capable=False), ["Read", "Grep", "Glob"])
+        self.assertEqual(implement_allowed_tools({"allowed_tools": ["Read"]}, write_capable=False), ["Read"])
+        self.assertEqual(cli_permission_mode("plan"), "dontAsk")
+        self.assertEqual(cli_permission_mode("acceptEdits"), "acceptEdits")
+
+
+class AdapterReadOnlySwarmModeTests(unittest.TestCase):
+    def test_adapter_read_only_settings_make_the_swarm_analysis(self) -> None:
+        from puppetmaster.workers import WorkerSpec, swarm_mode
+
+        plan = WorkerSpec("r", "review", adapter="claude-code", payload={"permission_mode": "plan"})
+        sandboxed = WorkerSpec("r", "review", adapter="codex", payload={"sandbox": "read-only"})
+        editing = WorkerSpec("i", "fix", adapter="claude-code", payload={"permission_mode": "acceptEdits"})
+        self.assertEqual(swarm_mode([plan]), "analysis")
+        self.assertEqual(swarm_mode([sandboxed]), "analysis")
+        self.assertEqual(swarm_mode([plan, editing]), "edit")

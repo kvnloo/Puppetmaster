@@ -75,8 +75,9 @@ class ImplementAllowedToolsTest(unittest.TestCase):
             self.assertIn(rule, allowed)
         self.assertNotIn("git push", allowed)
 
-    def test_explicit_tools_and_read_only_runs_are_untouched(self) -> None:
+    def test_explicit_tools_win_and_read_only_runs_get_read_tools(self) -> None:
         from puppetmaster.adapters.claude_code import implement_allowed_tools
 
         self.assertEqual(implement_allowed_tools({"allowed_tools": ["Read"]}, write_capable=True), ["Read"])
-        self.assertIsNone(implement_allowed_tools({}, write_capable=False))
+        # dontAsk denies anything not allowlisted, so read-only runs need the read tools.
+        self.assertEqual(implement_allowed_tools({}, write_capable=False), ["Read", "Grep", "Glob"])

@@ -194,9 +194,9 @@ class ClaudeCodeAdapter(CliWorkerAdapter):
             executable=[resolved, *command_base[1:]],
             model=model_for_cli,
             output_format=task.payload.get("output_format", "json"),
-            permission_mode=effective_permission_mode,
+            permission_mode=cli_permission_mode(effective_permission_mode),
             allowed_tools=implement_allowed_tools(task.payload, write_capable=write_capable),
-            disallowed_tools=task.payload.get("disallowed_tools"),
+            disallowed_tools=read_only_disallowed_tools(task.payload, write_capable=write_capable),
             extra_args=task.payload.get("extra_args", []),
         )
         return CliInvocation(
@@ -409,11 +409,36 @@ IMPLEMENT_VERIFY_TOOLS = (
 )
 
 
+# Read-only workers do not run in Claude Code's plan mode: plan mode writes the
+# worker's report to ~/.claude/plans and may leave stdout with only a pointer,
+# losing the report and littering the user's plans folder. ``dontAsk`` with a
+# read-only allowlist denies everything else and keeps the report on stdout.
+READ_ONLY_CLI_PERMISSION_MODE = "dontAsk"
+READ_ONLY_TOOLS = ("Read", "Grep", "Glob")
+READ_ONLY_DENIED_TOOLS = ("Edit", "Write", "NotebookEdit")
+
+
+def cli_permission_mode(permission_mode: str) -> str:
+    """The ``--permission-mode`` flag for a Puppetmaster permission mode."""
+    return READ_ONLY_CLI_PERMISSION_MODE if permission_mode == "plan" else permission_mode
+
+
 def implement_allowed_tools(payload: dict, *, write_capable: bool) -> object:
     explicit = payload.get("allowed_tools")
-    if explicit is not None or not write_capable:
+    if explicit is not None:
         return explicit
-    return list(IMPLEMENT_VERIFY_TOOLS)
+    return list(IMPLEMENT_VERIFY_TOOLS if write_capable else READ_ONLY_TOOLS)
+
+
+def read_only_disallowed_tools(payload: dict, *, write_capable: bool) -> object:
+    requested = payload.get("disallowed_tools")
+    if write_capable:
+        return requested
+    if isinstance(requested, str):
+        names = [name.strip() for name in requested.split(",") if name.strip()]
+    else:
+        names = [str(name) for name in requested or []]
+    return list(dict.fromkeys([*names, *READ_ONLY_DENIED_TOOLS]))
 
 
 def build_claude_code_command(
