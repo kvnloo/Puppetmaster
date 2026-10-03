@@ -193,6 +193,15 @@ def merge_routing_payload(
     from puppetmaster.model_registry import stamp_model_billing
 
     caller = dict(payload or {})
+    # A reroute must take the new model's payload_defaults (e.g. its provider).
+    # Keys the previous route injected are not caller-explicit, so they must not
+    # outrank the new defaults: a fallback off opencode-go stayed on opencode-go.
+    previous = caller.get("router_model_id")
+    if previous and previous != decision.model.id:
+        prior = next((spec for spec in (registry or ()) if spec.id == previous), None)
+        for key, value in ((prior.payload_defaults or {}).items() if prior is not None else ()):
+            if caller.get(key) == value:
+                caller.pop(key)
     merged = {
         **stamp_model_billing(caller, decision.model, registry=registry,
                               previous_adapter=previous_adapter),

@@ -20,6 +20,17 @@ _ARTIFACT_EMPTY_GUIDANCE = (
 )
 
 
+# What a worker's PASS/PARTIAL/FAIL means. Without it, read-only analysis
+# workers graded themselves PARTIAL for not running tests they cannot run, and
+# every clean audit was reported degraded.
+WORKER_VERDICT_SEMANTICS = (
+    "Grade the verdict against your assigned scope: PASS when you covered it, "
+    "PARTIAL when part of it went uncovered (say which part), FAIL when you "
+    "could not do the task. Read-only analysis cannot execute code; not running "
+    "tests or reproducing at runtime is not a reason for PARTIAL."
+)
+
+
 _IMPLEMENT_REPORT_CONTRACT = (
     "Reporting contract: when you are done, end your final message with a short "
     "report — what you changed and why, the files you touched, and exactly what "
@@ -207,7 +218,8 @@ def build_structured_prompt(
                 "This is a review task. Submit exactly one advisory worker verdict "
                 "using the native `worker_verdict` object: `verdict` is PASS, FAIL, "
                 "or PARTIAL and `reason` is a short non-empty string. Do not also "
-                "emit a VERDICT line when using that structured channel."
+                "emit a VERDICT line when using that structured channel. "
+                + WORKER_VERDICT_SEMANTICS
             )
         lines.extend(submit_lines)
     else:
@@ -228,7 +240,8 @@ def build_structured_prompt(
                 '`"worker_verdict":{"verdict":"PASS|FAIL|PARTIAL","reason":"..."}` '
                 "object in JSON-native output. If only free text is available, "
                 "instead make the final non-blank line `VERDICT: PASS - reason` "
-                "(or FAIL/PARTIAL). Never use both verdict channels."
+                "(or FAIL/PARTIAL). Never use both verdict channels. "
+                + WORKER_VERDICT_SEMANTICS
             )
     lines.extend([_ARTIFACT_GROUNDING, _ARTIFACT_EMPTY_GUIDANCE])
     if final_message_note:

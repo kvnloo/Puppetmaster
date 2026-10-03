@@ -204,6 +204,11 @@ def provider_qualified_identity_verdict(
         return None
 
     spec, provider = resolved
+    # The registry's explicit binding wins over the id namespace: an OpenRouter
+    # model may be named agentic/deepseek/... or agentic/openai/...
+    bound = spec.payload_defaults.get("provider")
+    if isinstance(bound, str) and bound.strip():
+        provider = bound.strip().lower()
     if not spec.is_routable:
         return (
             False,

@@ -114,6 +114,7 @@ from ._prompts import (
     _EMPTY_RESPONSE_NUDGE,
     _IMPLEMENT_NOOP_NUDGE,
     _LENGTH_CONTINUATION_NUDGE,
+    WORKER_VERDICT_SEMANTICS,
     build_implement_prompt,
     prompt_with_memory,
     prompt_with_skills,
@@ -2074,7 +2075,7 @@ class AgenticAdapter(FullEditWorkerAdapter):
                 },
                 "worker_verdict": {
                     "type": "object",
-                    "description": "Optional advisory review verdict; not a runtime gate.",
+                    "description": "Optional advisory review verdict; not a runtime gate. " + WORKER_VERDICT_SEMANTICS,
                     "properties": {
                         "verdict": {
                             "type": "string", "enum": ["PASS", "FAIL", "PARTIAL"],

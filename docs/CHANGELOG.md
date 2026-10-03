@@ -1,3 +1,25 @@
+## v1.27.41 — 2026-10-03
+
+**A router fallback runs on the fallback model's own provider.**
+
+- A rate-limited opencode-go worker fell back to an OpenRouter model, but the
+  first route's injected `provider` stayed in the task payload: registry
+  `payload_defaults` merge under existing keys, so the fallback went back to
+  the exhausted opencode-go account and failed the same way.
+  `merge_routing_payload` now drops keys the previous route injected (equal to
+  its model's `payload_defaults`) before stamping the new model. A provider the
+  caller set still wins.
+- Provider-qualified preflight read the provider from the id namespace, so an
+  OpenRouter model named `agentic/deepseek/...` was blocked as "provider
+  'deepseek' is not available" with only OpenRouter keyed. The registry's
+  explicit `payload_defaults.provider` binding now outranks the namespace.
+- Worker verdicts had no definition. Read-only analysis workers graded
+  themselves PARTIAL because they "performed no test execution", which
+  analysis mode forbids, so every clean audit was reported degraded. The
+  review prompt and the `submit_findings` schema now define the verdict
+  against the assigned scope, and say that not executing code is not a
+  reason for PARTIAL.
+
 ## v1.27.40 — 2026-10-03
 
 **A worker that dies attaching to the store is respawned, and its siblings finish their work.**

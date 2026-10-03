@@ -17,6 +17,20 @@ from puppetmaster.worker_verdict import (
 
 
 class WorkerVerdictTests(unittest.TestCase):
+    def test_verdict_is_graded_against_scope_not_execution(self) -> None:
+        # Read-only analysis workers graded themselves PARTIAL for not running
+        # tests they cannot run, so every clean audit read as degraded.
+        from puppetmaster.adapters._prompts import WORKER_VERDICT_SEMANTICS, build_structured_prompt
+        from puppetmaster.adapters.agentic import AgenticAdapter
+
+        self.assertIn("not a reason for PARTIAL", WORKER_VERDICT_SEMANTICS)
+        for note in (True, False):
+            with self.subTest(final_message_note=note):
+                prompt = build_structured_prompt("audit x", final_message_note=note, terminal_verdict=True)
+                self.assertIn(WORKER_VERDICT_SEMANTICS, prompt)
+        tool = AgenticAdapter._submit_tool(implement=False, fn=lambda name, desc, props, required: props)
+        self.assertIn(WORKER_VERDICT_SEMANTICS, tool["worker_verdict"]["description"])
+
     def test_valid_terminal_verdicts(self) -> None:
         for name in ("PASS", "FAIL", "PARTIAL"):
             with self.subTest(name=name):
