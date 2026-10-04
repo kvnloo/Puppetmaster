@@ -123,10 +123,14 @@ class IncarnationHistoryTests(unittest.TestCase):
                 def bootstrap(_):
                     store = cls(tmp)
                     store.init()
-                    return store.incarnation
+                    return store
                 with ThreadPoolExecutor(max_workers=4) as pool:
-                    identities = list(pool.map(bootstrap, range(8)))
-                self.assertEqual(len(set(identities)), 1)
+                    stores = list(pool.map(bootstrap, range(8)))
+                # Bootstrap is the race under test. Read identities once it has
+                # settled: a readonly identity read waits for an idle source and
+                # gives up after 5s of sibling activity, which a stalled Windows
+                # runner exceeded mid-bootstrap (ReadUnavailable: active reader).
+                self.assertEqual(len({store.incarnation for store in stores}), 1)
 
     def test_historical_pages_bounds_inserts_filters_and_no_hydration(self):
         for store, job in self.stores():
