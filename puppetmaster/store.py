@@ -210,6 +210,9 @@ def _memory_retrieval_score(
     return score, confidence, created_at_key, overlap
 
 
+_WINDOWS = os.name == "nt"
+
+
 def _retry_on_windows_lock(operation):
     """Run a filesystem op, retrying briefly on a Windows sharing-violation.
 
@@ -3915,10 +3918,17 @@ class SwarmStore(StoreContracts):
         payload = json.dumps({"owner": owner, "at": time.time()}, sort_keys=True)
         while True:
             try:
-                descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                # Windows refuses an exclusive create with a sharing violation
+                # while the previous owner's unlink of this file is pending.
+                descriptor = _retry_on_windows_lock(
+                    lambda: os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
                 with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
                     handle.write(payload)
                 return True
+            except PermissionError:
+                if not _WINDOWS:
+                    raise
+                return False  # still contended after the retry window: held
             except FileExistsError:
                 if ttl_seconds is None:
                     return False

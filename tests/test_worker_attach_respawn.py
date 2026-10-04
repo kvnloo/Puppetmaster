@@ -36,6 +36,44 @@ class WorkerAttachRespawnTests(unittest.TestCase):
             log = Path(tmp) / "jobs" / "job_x" / "tasks" / "startup_error-w-1.log"
             self.assertIn("metadata changed", log.read_text())
 
+    def test_locked_file_metadata_init_is_an_attach_failure(self) -> None:
+        # Windows CI: a file-store worker built its metadata index lazily at its
+        # first lock, after attach, so "database is locked" there exited 1 and
+        # failed the job instead of being respawned.
+        import sqlite3
+
+        with TemporaryDirectory() as tmp, patch.dict(os.environ):
+            store = SwarmStore(Path(tmp))
+            store.init()
+            job = store.create_job("audit")
+            with patch.object(SwarmStore, "init", side_effect=sqlite3.OperationalError("database is locked")):
+                code = worker_main(["--state-dir", tmp, "--backend", "file", "--job-id", job.id,
+                                    "--role", "explore", "--worker-id", "w-1"])
+        self.assertEqual(code, WORKER_ATTACH_FAILED_EXIT)
+
+    def test_lock_create_survives_a_pending_delete_on_windows(self) -> None:
+        # Windows refuses O_EXCL create with a sharing violation while the
+        # previous owner's unlink is pending; the worker died with PermissionError.
+        import puppetmaster.store as store_module
+
+        with TemporaryDirectory() as tmp, patch.object(store_module, "_WINDOWS", True), \
+                patch.object(store_module, "_WINDOWS_LOCK_BACKOFF_SECONDS", 0):
+            store = SwarmStore(Path(tmp) / ".puppetmaster")
+            store.init()
+            real_open, refusals = os.open, [2]
+
+            def pending_delete(path, flags, *args):
+                if refusals[0]:
+                    refusals[0] -= 1
+                    raise PermissionError(13, "Permission denied", path)
+                return real_open(path, flags, *args)
+
+            with patch.object(store_module.os, "open", pending_delete):
+                self.assertTrue(store.acquire_lock("completion_job_x", "w-1", ttl_seconds=300))
+            refusals[0] = 10**6
+            with patch.object(store_module.os, "open", pending_delete):
+                self.assertFalse(store.acquire_lock("other", "w-2", ttl_seconds=300))
+
     def _swarm(self, failing_spawns: int):
         tmp = TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
